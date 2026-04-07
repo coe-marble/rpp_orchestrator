@@ -1,0 +1,23 @@
+{
+    "Id": "0f79c310-23a7-4b0d-9134-99211e5e6d76",
+    "ComponentKey": "controller",
+    "ScriptName": "mock_workspace",
+    "Name": "Explicit200",
+    "Description": "",
+    "LibVersionHash": "",
+    "Lib": "data_driven_lib",
+    "LibVersion": "0.0.1",
+    "PluginType": "rpp::Controller",
+    "PluginName": "ExplicitDeePC",
+    "IsComposable": false,
+    "RefHorizon": 1,
+    "Mux": {
+        "Inputs": 1,
+        "Outputs": 1
+    },
+    "Subcomponents": [
+        "Disturbance",
+        "Subcontrollers"
+    ],
+    "PluginImplementation": "mat"
+}

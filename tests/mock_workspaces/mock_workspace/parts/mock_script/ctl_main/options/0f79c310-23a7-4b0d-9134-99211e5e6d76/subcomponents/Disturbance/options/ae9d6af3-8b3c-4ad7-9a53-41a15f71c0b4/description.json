@@ -1,0 +1,12 @@
+{
+    "Id": "ae9d6af3-8b3c-4ad7-9a53-41a15f71c0b4",
+    "ComponentKey": "Disturbance",
+    "ScriptName": "mock_workspace",
+    "ParentComponentId": "0f79c310-23a7-4b0d-9134-99211e5e6d76",
+    "Name": "Wind Disturbance",
+    "Description": "",
+    "PluginType": "rpp::DisturbanceGenerator",
+    "PluginName": "WindForce",
+    "PluginImplementation": "mat",
+    "Subcomponents": []
+}
