@@ -1,0 +1,30 @@
+{
+    "Id": "817329f6-369b-4c9e-a4ec-65c91b8fa406",
+    "Name": "parent3_component",
+    "PluginType": "rpp_common::MotionController2D",
+    "PluginName": "MockLib::MockControllerWithSingleComponentListPlugin",
+    "Library": "MockLib",
+    "Folder": "/tmp/pytest-of-luka/pytest-270/test_create_mock_workspace_pop0/mock_workspace/parts/mock_lib__mock_controller_with_single_component_list_plugin/817329f6-369b-4c9e-a4ec-65c91b8fa406",
+    "DescriptorPath": "/tmp/pytest-of-luka/pytest-270/test_create_mock_workspace_pop0/mock_workspace/parts/mock_lib__mock_controller_with_single_component_list_plugin/817329f6-369b-4c9e-a4ec-65c91b8fa406/description.json",
+    "Subcomponents": {
+        "ctl1": [
+            {
+                "Id": "d5d8e19f-2abd-42ca-bffe-ea91ce92d9b9",
+                "PluginType": "rpp_common::MotionController2D",
+                "PluginName": "MockLib::MockControllerPlugin",
+                "SlotName": "ctl1",
+                "Library": "MockLib",
+                "Folder": "/tmp/pytest-of-luka/pytest-270/test_create_mock_workspace_pop0/mock_workspace/parts/mock_lib__mock_controller_with_single_component_list_plugin/817329f6-369b-4c9e-a4ec-65c91b8fa406/subcomponents/d5d8e19f-2abd-42ca-bffe-ea91ce92d9b9"
+            },
+            {
+                "Id": "7bc8eb23-1c10-48df-b7d2-b8991b3e78ff",
+                "PluginType": "rpp_common::MotionController2D",
+                "PluginName": "MockLib::MockControllerWithSingleComponentPlugin",
+                "SlotName": "ctl1",
+                "Library": "MockLib",
+                "Folder": "/tmp/pytest-of-luka/pytest-270/test_create_mock_workspace_pop0/mock_workspace/parts/mock_lib__mock_controller_with_single_component_list_plugin/817329f6-369b-4c9e-a4ec-65c91b8fa406/subcomponents/7bc8eb23-1c10-48df-b7d2-b8991b3e78ff"
+            }
+        ]
+    },
+    "ParentComponentInfo": null
+}

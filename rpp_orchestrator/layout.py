@@ -30,13 +30,12 @@ class WorkspaceLayout:
 
 @dataclass(frozen=True)
 class ComponentLayout:
-    options_dir: str = "options"
     data_dir: str = "data"
     params_dir: str = "params"
     subcomponents_dir: str = "subcomponents"
     description_filename: str = "description.json"
     callbacks_filename: str = "callbacks.py"
-    parameters_filename: str = "parameters.json"
+    parameters_filename: str = "parameters.py"
 
 
 def default_component_layout() -> ComponentLayout:

@@ -93,14 +93,14 @@ class WorkspaceWindow(QMainWindow):
         if not accepted or not name.strip():
             return
         workspace_root = Path(root).expanduser() / name.strip()
-        workspace = create_workspace(workspace_root, name=name.strip(), overwrite=False)
+        workspace = create_workspace(workspace_root, name=name.strip(), overwrite=False, lib_manager=self.editor.lib_manager)
         self.set_workspace(workspace)
 
     def open_workspace(self) -> None:
         root = QFileDialog.getExistingDirectory(self, "Open workspace")
         if not root:
             return
-        workspace = Workspace(root=__import__("pathlib").Path(root).expanduser().resolve())
+        workspace = Workspace(root=Path(root).expanduser().resolve(), lib_manager=self.editor.lib_manager)
         workspace.ensure_layout()
         self.set_workspace(workspace)
 

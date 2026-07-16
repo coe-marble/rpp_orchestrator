@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from rpp_orchestrator.workspace import OrchestrationScript
+from rpp_orchestrator.orchestration_script import OrchestrationScript
 
 COMPONENTS = {}
 

@@ -10,8 +10,7 @@ from ..workspace import Workspace
 from .window import WorkspaceWindow
 
 
-def main(workspace_root: Path | None = None) -> int:
-    app = QApplication(sys.argv)
+def set_pallette_and_style_to_app(app):
     palette = QPalette()
     palette.setColor(QPalette.ColorRole.Window, QColor("#f3f5f7"))
     palette.setColor(QPalette.ColorRole.WindowText, QColor("#19202a"))
@@ -64,6 +63,10 @@ def main(workspace_root: Path | None = None) -> int:
         }
         """
     )
+
+def main(workspace_root: Path | None = None) -> int:
+    app = QApplication(sys.argv)
+    set_pallette_and_style_to_app(app)
 
     window = WorkspaceWindow()
     if workspace_root is not None:

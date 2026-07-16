@@ -1,0 +1,17 @@
+{
+    "Id": "0f740524-bbe0-4cc3-90f2-e6f9ab329656",
+    "Name": "subcomponent1",
+    "PluginType": "rpp_common::MotionController2D",
+    "PluginName": "MockLib::MockControllerPlugin",
+    "Library": "MockLib",
+    "Folder": "/tmp/pytest-of-luka/pytest-270/test_create_mock_workspace_pop0/mock_workspace/parts/mock_lib__mock_controller_with_single_component_plugin/5124eea5-fb0a-49a6-8593-d26f2289044f/subcomponents/0f740524-bbe0-4cc3-90f2-e6f9ab329656",
+    "DescriptorPath": "/tmp/pytest-of-luka/pytest-270/test_create_mock_workspace_pop0/mock_workspace/parts/mock_lib__mock_controller_with_single_component_plugin/5124eea5-fb0a-49a6-8593-d26f2289044f/subcomponents/0f740524-bbe0-4cc3-90f2-e6f9ab329656/description.json",
+    "Subcomponents": null,
+    "ParentComponentInfo": {
+        "Id": "5124eea5-fb0a-49a6-8593-d26f2289044f",
+        "PluginType": "rpp_common::MotionController2D",
+        "PluginName": "MockLib::MockControllerWithSingleComponentPlugin",
+        "SlotName": "ctl1",
+        "Library": "MockLib"
+    }
+}
