@@ -34,11 +34,10 @@ def setup_test_plugins(rpp_home) -> LibraryManager:
             [
                 "from rpp_plugin_types.rpp_common import DisturbanceGenerator2D",
                 "",
-                "COMPONENTS = {"
-                "    \"ctl1\": \"rpp_common::MotionController2D\","
-                "}",
-                "",
                 "class MockDisturbanceGeneratorPlugin(DisturbanceGenerator2D):",
+                "    COMPONENTS = {",
+                "        \"ctl1\": \"rpp_common::MotionController2D\",",
+                "    }",
                 "    tag = \"mock_dist\"",
                 "",
                 "    def name(self) -> str:",
@@ -58,12 +57,11 @@ def setup_test_plugins(rpp_home) -> LibraryManager:
             [
                 "from rpp_plugin_types.rpp_common import MotionController2D",
                 "",
-                "COMPONENTS = {"
-                "    \"ctl1\": \"rpp_common::MotionController2D\","
-                "}",
                 "",
                 "class MockControllerWithSingleComponentPlugin(MotionController2D):",
-                "    tag = \"mock_ctl_single\"",
+                "    COMPONENTS = {",
+                "        \"ctl1\": \"rpp_common::MotionController2D\",",
+                "    }",
                 "",
                 "    def name(self) -> str:",
                 "        return \"MockControllerWithSingleComponentPlugin\"",
@@ -81,13 +79,12 @@ def setup_test_plugins(rpp_home) -> LibraryManager:
             [
                 "from rpp_plugin_types.rpp_common import MotionController2D",
                 "",
-                "COMPONENTS = {"
-                "    \"ctl1\": \"rpp_common::MotionController2D\","
-                "    \"ctl2\": \"rpp_common::MotionController2D\","
-                "}",
                 "",
                 "class MockControllerWithMultipleComponentsPlugin(MotionController2D):",
-                "    tag = \"mock_ctl_multi\"",
+                "    COMPONENTS = {",
+                "        \"ctl1\": \"rpp_common::MotionController2D\",",
+                "        \"ctl2\": \"rpp_common::MotionController2D\",",
+                "    }",
                 "",
                 "    def name(self) -> str:",
                 "        return \"MockControllerWithMultipleComponentsPlugin\"",
@@ -105,12 +102,11 @@ def setup_test_plugins(rpp_home) -> LibraryManager:
             [
                 "from rpp_plugin_types.rpp_common import MotionController2D",
                 "",
-                "COMPONENTS = {"
-                "    \"ctl1\": [\"rpp_common::MotionController2D\"],"
-                "}",
                 "",
                 "class MockControllerWithSingleComponentListPlugin(MotionController2D):",
-                "    tag = \"mock_ctl_single_list\"",
+                "    COMPONENTS = {",
+                "        \"ctl1\": [\"rpp_common::MotionController2D\"],",
+                "    }",
                 "",
                 "    def name(self) -> str:",
                 "        return \"MockControllerWithSingleComponentListPlugin\"",
@@ -221,12 +217,12 @@ from rpp_plugin_types.rpp_common import MotionController2D
 from rpp_plugin_types.rpp_common import DisturbanceGenerator2D
 
 
-COMPONENTS = {
-    "ctl_main": "rpp_common::MotionController2D",
-    "ctl_disturbance": "rpp_common::DisturbanceGenerator2D",
-}
 
 class MockWorkspace(OrchestrationScript):
+    COMPONENTS = {
+        "ctl_main": "rpp_common::MotionController2D",
+        "ctl_disturbance": "rpp_common::DisturbanceGenerator2D",
+    }
     def run(self) -> None:
         raise NotImplementedError("Define the workspace logic here.")
 

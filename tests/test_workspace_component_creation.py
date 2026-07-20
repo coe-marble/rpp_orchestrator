@@ -20,7 +20,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from rpp_orchestrator.workspace import create_workspace, open_workspace, default_script_source
 from rpp_orchestrator.gui.assign_or_create_component_dialog import _filter_available_plugins
-from rpp_common import ParamDescriptor
+from rpp_common import ParameterDescription
 from rpp_plugin_registrator.library_manager import LibraryManager
 from rpp_plugin_registrator import registry_paths as rp
 from rpp_orchestrator.workspace import Workspace, ComponentRecord
@@ -275,9 +275,9 @@ def test_create_part_folder_seeds_parameters_from_param_description(setup_plugin
         component_name="gamma_controller",
         plugin_name="MockLib::MockControllerPlugin",
         parameters=[
-            ParamDescriptor(name="Kp", default_value=1.0),
-            ParamDescriptor(name="Ki", default_value=0.0),
-            ParamDescriptor(name="enabled", default_value=True),
+            ParameterDescription(name="Kp", default_value=1.0),
+            ParameterDescription(name="Ki", default_value=0.0),
+            ParameterDescription(name="enabled", default_value=True),
         ],
     )
 
@@ -301,9 +301,9 @@ def test_load_parameters_from_component_parameters_file(setup_plugins, tmp_path:
         component_name="gamma_controller",
         plugin_name="MockLib::MockControllerPlugin",
         parameters=[
-            ParamDescriptor(name="Kp", default_value=1.0),
-            ParamDescriptor(name="Ki", default_value=0.0),
-            ParamDescriptor(name="enabled", default_value=True),
+            ParameterDescription(name="Kp", default_value=1.0),
+            ParameterDescription(name="Ki", default_value=0.0),
+            ParameterDescription(name="enabled", default_value=True),
         ],
     )
 

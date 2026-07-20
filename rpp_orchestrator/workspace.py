@@ -220,12 +220,14 @@ class Workspace:
         parent_record = self.component_data_store.load_description(parent_folder)
         parent_plugin_info = self.lib_manager.get_plugin_info_from_lib(parent_record.plugin_name)  # Ensure plugin is loaded
 
-        if slot_name not in parent_plugin_info["Components"]:
+        metadata = parent_plugin_info.get("PluginMetadata", {})
+        components = metadata.get("Components", {})
+        if slot_name not in components:
             raise ValueError(f"Plugin '{parent_record.plugin_name}' does not have a component slot named '{slot_name}'")
 
         subcomponent_info = self.lib_manager.get_plugin_info_from_lib(plugin_name)
 
-        slot_type = parent_plugin_info["Components"][slot_name]
+        slot_type = components[slot_name]
 
         # overwrite component if it is not specified as a list in COMPONENTS field of the parent plugin
         allow_list = False
