@@ -11,18 +11,24 @@ from uuid import UUID
 import pytest
 from unittest import mock
 
-MOCK_WORKSPACES_ROOT = Path(__file__).parent / "mock_workspaces"
-MOCK_WORKSPACE_EMPTY = MOCK_WORKSPACES_ROOT / "empty_workspace"
-MOCK_WORKSPACE_POPULATED = MOCK_WORKSPACES_ROOT / "mock_workspace"
+
+
+RPP_TESTING_PATH = Path(__file__).parent.parent.parent.resolve() \
+    / "rpp_testing" / "rpp_testing"
+FIXTURE_WORKSPACES_PATH = RPP_TESTING_PATH / "data" / "mock_workspaces"
+
+MOCK_WORKSPACE_EMPTY = FIXTURE_WORKSPACES_PATH / "empty_workspace"
+MOCK_WORKSPACE_POPULATED = FIXTURE_WORKSPACES_PATH / "mock_workspace"
+SAVE_MOCK_WORKSPACE_TO_PATH = False  # Set to True to save the mock workspace to disk for inspection
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from rpp_orchestrator.component_storage import LinkedComponentRecord
 from rpp_orchestrator.workspace import create_workspace, open_workspace, default_script_source
-from rpp_orchestrator.gui.assign_or_create_component_dialog import _filter_available_plugins
 from rpp_common import ParameterDescription
 from rpp_plugin_registrator.library_manager import LibraryManager
-from rpp_plugin_registrator import registry_paths as rp
+from rpp_plugin_registrator import registry_config as rp
 from rpp_orchestrator.workspace import Workspace, ComponentRecord
 from rpp_orchestrator.gui.assign_or_create_component_dialog import create_assign_or_create_component_dialog
 
@@ -41,6 +47,7 @@ def rpp_home() -> Generator[Path, None, None]:
         try:
             yield new_home
         finally:
+            rpp_plugin_registrator.plugin_type_registrator.reset_module()
             rp.RPP_HOME = original_rpp_home
 
 @pytest.fixture
@@ -51,10 +58,11 @@ def test_setup_registers_mock_plugins_for_available_plugins(setup_plugins: Libra
     plugins = setup_plugins.get_available_plugins()
 
     assert "MockLib" in plugins
-    plugin_items = [item for group in plugins["MockLib"].values() for item in group]
 
-    controller_item = next((item for item in plugin_items if item.get("ClassName") == "MockControllerPlugin"), None)
-    disturbance_item = next((item for item in plugin_items if item.get("ClassName") == "MockDisturbanceGeneratorPlugin"), None)
+    controller_item = next((item for item in plugins["MockLib"]["rpp_common::MotionController2D"] \
+            if item.get("PluginName") == "MockLib::MockControllerPlugin"), None)
+    disturbance_item = next((item for item in plugins["MockLib"]["rpp_common::DisturbanceGenerator2D"] \
+            if item.get("PluginName") == "MockLib::MockDisturbanceGeneratorPlugin"), None)
 
     assert controller_item is not None
     assert disturbance_item is not None
@@ -68,7 +76,7 @@ def test_mock_script_components_are_plugin_types(setup_plugins: LibraryManager) 
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
-    components = module.COMPONENTS
+    components = module.Example.COMPONENTS
 
     assert components["ctl_main"] == "rpp_common::MotionController2D"
     assert components["ctl_disturbance"] == "rpp_common::DisturbanceGenerator2D"
@@ -76,17 +84,19 @@ def test_mock_script_components_are_plugin_types(setup_plugins: LibraryManager) 
 
 def test_write_components_roundtrip(tmp_path: Path) -> None:
     workspace = create_workspace(tmp_path / "demo_ws", name="demo_ws")
-    script_path = workspace.scripts_path / "demo_ws.py"
+    script_path = workspace.root / "demo_ws.py"
 
     payload = {
+        "ScriptPath": str(script_path),
+        "Language": "python",
         "Components": {
             "planner": "rpp_common::MotionPlanner",
             "estimator": "rpp_common::Estimator",
         }
     }
 
-    workspace.write_script_component_assignments(script_path, payload)
-    read_back = workspace.read_script_component_assignments(script_path)
+    workspace.write_script_description(script_path, "python", payload["Components"])
+    read_back = workspace.read_script_description(script_path)
 
     assert read_back == payload
 
@@ -94,25 +104,22 @@ def test_write_components_roundtrip(tmp_path: Path) -> None:
 def test_create_workspace_layout_and_default_script(tmp_path: Path) -> None:
     workspace = create_workspace(tmp_path / "alpha", name="alpha")
 
-    script_path = workspace.scripts_path / "alpha.py"
+    script_path = workspace.root / "alpha.py"
 
-    assert workspace.scripts_path.exists()
+    assert workspace.root.exists()
     assert workspace.parts_path.exists()
     assert workspace.data_path.exists()
     assert workspace.builds_path.exists()
     assert workspace.logs_path.exists()
     assert script_path.exists()
     assert "COMPONENTS = {}" in script_path.read_text(encoding="utf-8")
-    assert "COMPONENTS_JSON" not in script_path.read_text(encoding="utf-8")
 
 
 def test_default_script_source_is_language_dependent() -> None:
-    source = default_script_source("DemoScript", language="python")
+    source = default_script_source(Path("DemoScript"))
 
-    assert "from rpp_orchestrator.orchestration_script import OrchestrationScript" in source
     assert "COMPONENTS = {}" in source
-    assert "COMPONENTS_JSON" not in source
-    assert "class DemoScript(OrchestrationScript):" in source
+    assert "class Demoscript:" in source
 
 
 def test_empty_mock_workspace_has_no_parts() -> None:
@@ -125,8 +132,7 @@ def test_create_mock_workspace_populated(setup_plugins, tmp_path: Path, rpp_home
     ws = create_mock_workspace(tmp_path, rpp_home)
 
     # The mock workspace should have been created with the expected structure and files
-    save_to_path = False
-    if save_to_path:
+    if SAVE_MOCK_WORKSPACE_TO_PATH:
         import shutil
         shutil.rmtree(MOCK_WORKSPACE_POPULATED, ignore_errors=True)
         shutil.copytree(tmp_path / "mock_workspace", MOCK_WORKSPACE_POPULATED, dirs_exist_ok=True)
@@ -148,7 +154,7 @@ def test_create_part_folder_writes_unique_descriptor(setup_plugins, rpp_home) ->
     workspace = create_workspace(rpp_home / "beta", name="beta")
 
     record = workspace.create_component(
-        "component1", "MockLib::MockControllerPlugin", parameters={"param1": "value1"}
+        "component1", "MockLib::MockControllerPlugin"
     )
 
     descriptor = workspace.read_part_descriptor(record.folder)
@@ -165,12 +171,12 @@ def test_create_part_folder_gives_unique_names_when_component_already_exists(set
     workspace = create_workspace(rpp_home / "beta_unique", name="beta_unique")
 
     first = workspace.create_component(
-        "component1", "MockLib::MockControllerPlugin", parameters={"param1": "value1"}
+        "component1", "MockLib::MockControllerPlugin"
     )
     first_descriptor = workspace.read_part_descriptor(first.folder)
 
     second = workspace.create_component(
-        "component1", "MockLib::MockControllerPlugin", parameters={"param1": "value1"}
+        "component1", "MockLib::MockControllerPlugin"
     )
     second_descriptor = workspace.read_part_descriptor(second.folder)
     assert first_descriptor.name == "component1"
@@ -181,17 +187,16 @@ def test_create_subcoponent_nonexisting_slot_raises_error(setup_plugins, rpp_hom
     workspace = create_workspace(rpp_home / "beta_sub_nonexisting", name="beta_sub_nonexisting")
 
     parent = workspace.create_component(
-        "parent_component", "MockLib::MockControllerWithSingleComponentPlugin", parameters={"param1": "value1"}
+        "parent_component", "MockLib::MockControllerWithSingleComponentPlugin"
     )
 
     slot_name = "NonExistingSlot"
     with pytest.raises(ValueError) as exc_info:
-        workspace.assign_subcomponent(
+        workspace.create_subcomponent(
             parent.folder,
             slot_name,
             "disturbance1",
-            "MockLib::MockControllerPlugin",
-            parameters={"param1": "value1"}
+            "MockLib::MockControllerPlugin"
         )
     assert f"Plugin 'MockLib::MockControllerWithSingleComponentPlugin' does not have a component slot named '{slot_name}'" in str(exc_info.value)
 
@@ -199,17 +204,16 @@ def test_create_subcomponent_wrong_type_raises_error(setup_plugins, rpp_home) ->
     workspace = create_workspace(rpp_home / "beta_sub_wrong_type", name="beta_sub_wrong_type")
 
     parent = workspace.create_component(
-        "parent_component", "MockLib::MockControllerWithSingleComponentPlugin", parameters={"param1": "value1"}
+        "parent_component", "MockLib::MockControllerWithSingleComponentPlugin"
     )
 
     slot_name = "ctl1"
     with pytest.raises(ValueError) as exc_info:
-        workspace.assign_subcomponent(
+        workspace.create_subcomponent(
             parent.folder,
             slot_name,
             "disturbance1",
             "MockLib::MockDisturbanceGeneratorPlugin",  # This is the wrong type for the slot
-            parameters={"param1": "value1"}
         )
     assert f"Plugin 'MockLib::MockDisturbanceGeneratorPlugin' has an invalid type for subcomponent field '{slot_name}'" in str(exc_info.value)
 
@@ -217,16 +221,15 @@ def test_create_subcomponent_pass(setup_plugins, rpp_home) -> None:
     workspace = create_workspace(rpp_home / "beta_sub_unique", name="beta_sub_unique")
 
     parent = workspace.create_component(
-        "parent_component", "MockLib::MockControllerWithSingleComponentPlugin", parameters={"param1": "value1"}
+        "parent_component", "MockLib::MockControllerWithSingleComponentPlugin"
     )
 
     slot_name = "ctl1"
-    first = workspace.assign_subcomponent(
+    first = workspace.create_subcomponent(
         parent.folder,
         slot_name,
         "controller1",
         "MockLib::MockControllerPlugin",
-        parameters={"param1": "value1"}
     )
 
 
@@ -250,12 +253,11 @@ def test_create_subcomponent_pass(setup_plugins, rpp_home) -> None:
     assert parent_after_first.subcomponents[slot_name].id == first.id
     # second subcomponent with the same slot name should
     # override the first one, since the slot is a single component slot
-    second = workspace.assign_subcomponent(
+    second = workspace.create_subcomponent(
         parent.folder,
         slot_name,
         "controller2",
         "MockLib::MockControllerPlugin",
-        parameters={"param1": "value1"}
     )
 
     parent_descriptor_after_second = workspace.read_part_descriptor(parent.folder)
@@ -273,24 +275,22 @@ def test_create_part_folder_seeds_parameters_from_param_description(setup_plugin
 
     record = workspace.create_component(
         component_name="gamma_controller",
-        plugin_name="MockLib::MockControllerPlugin",
-        parameters=[
-            ParameterDescription(name="Kp", default_value=1.0),
-            ParameterDescription(name="Ki", default_value=0.0),
-            ParameterDescription(name="enabled", default_value=True),
-        ],
+        plugin_name="MockLib::MockDisturbanceGeneratorPlugin",
     )
 
     params_path = workspace.part_parameters_path(record.folder)
     assert params_path.exists()
-    assert params_path.read_text(encoding="utf-8") == (
+
+    read_text = params_path.read_text(encoding="utf-8")
+
+    assert read_text == (
         "from __future__ import annotations\n"
         "\n"
         "\n"
         "class ComponentParameters:\n"
-        "    Kp = 1.0\n"
-        "    Ki = 0.0\n"
-        "    enabled = True\n"
+        "    param1 = 0.0\n"
+        "    param2 = 1.0\n"
+        "    param3 = True\n"
     )
 
 
@@ -299,54 +299,18 @@ def test_load_parameters_from_component_parameters_file(setup_plugins, tmp_path:
 
     record = workspace.create_component(
         component_name="gamma_controller",
-        plugin_name="MockLib::MockControllerPlugin",
-        parameters=[
-            ParameterDescription(name="Kp", default_value=1.0),
-            ParameterDescription(name="Ki", default_value=0.0),
-            ParameterDescription(name="enabled", default_value=True),
-        ],
+        plugin_name="MockLib::MockDisturbanceGeneratorPlugin",
     )
 
     # Load the parameters back from the file
     loaded_params = workspace.component_parameter_store.load(record.folder)
 
     assert loaded_params == {
-        "Kp": 1.0,
-        "Ki": 0.0,
-        "enabled": True,
+        "param1": 0.0,
+        "param2": 1.0,
+        "param3": True,
     }
 
-
-def test_filter_available_plugins_by_fully_qualified_base_class_name() -> None:
-    matching_entry = {
-        "Library": "TestLib",
-        "PluginName": "Match",
-        "ClassName": "MatchPlugin",
-        "PluginType": "rpp::Controller",
-        "DescriptionFile": "/tmp/MatchPlugin.py",
-    }
-    non_matching_entry = {
-        "Library": "TestLib",
-        "PluginName": "Other",
-        "ClassName": "OtherPlugin",
-        "PluginType": "rpp::DisturbanceGenerator",
-        "DescriptionFile": "/tmp/OtherPlugin.py",
-    }
-
-    filtered = _filter_available_plugins(
-        {
-            "TestLib": {
-                "rpp::Controller": [matching_entry],
-                "rpp::DisturbanceGenerator": [non_matching_entry]
-            },
-            "OtherLib": {
-                "rpp::DisturbanceGenerator": [non_matching_entry],
-            },
-        },
-        "rpp::Controller",
-    )
-
-    assert filtered == {"TestLib": [matching_entry]}
 
 
 def test_assign_or_create_component_dialog_initialization_with_plugins_and_components(setup_plugins: LibraryManager) -> None:
@@ -364,7 +328,7 @@ def test_assign_or_create_component_dialog_initialization_with_plugins_and_compo
                 folder=Path("/tmp/existing_component"),
                 library="MockLib",
                 parent_component_info=None,
-                descriptor_path=Path("/tmp/existing_component/part_descriptor.json"),
+                subcomponent_spec={},
             )
         ],
         "rpp_common::DisturbanceGenerator2D": [
@@ -376,7 +340,7 @@ def test_assign_or_create_component_dialog_initialization_with_plugins_and_compo
                 folder=Path("/tmp/existing_disturbance"),
                 library="MockLib",
                 parent_component_info=None,
-                descriptor_path=Path("/tmp/existing_disturbance/part_descriptor.json"),
+                subcomponent_spec={},
             )
         ],
     }
@@ -400,7 +364,13 @@ def test_assign_or_create_component_dialog_initialization_with_plugins_and_compo
         if not hasattr(self, 'children'):
             self.children = []
         if hasattr(child.setData, 'call_args') and child.setData.call_args:
-            self.children.append(child.setData.call_args[0][2])
+            data = child.setData.call_args[0][2]
+            if isinstance(data, dict) \
+                    and "IsPluginType" in data \
+                    and not data["IsPluginType"]:
+                self.children.append(child)
+            else:
+                self.children.append(data)
         else:
             self.children.append(child)
 
@@ -429,7 +399,8 @@ def test_assign_or_create_component_dialog_initialization_with_plugins_and_compo
         parent=None,
         workspace_components=workspace_components,
         available_plugins=entries_by_library,
-        plugin_type="rpp_common::MotionController2D"
+        plugin_type="rpp_common::MotionController2D",
+        offer_assign=True
     )
 
     assert dialog is not None
@@ -439,9 +410,14 @@ def test_assign_or_create_component_dialog_initialization_with_plugins_and_compo
     assert [x.id for x in component_tree.children] == ["12345678-1234-5678-1234-567812345678"]
     assert len(plugin_tree.children) == 1
 
-    lib_children = plugin_tree.children[0].children
+    lib_children = plugin_tree.children[0]
 
-    assert len(lib_children) == 4
+    assert len(lib_children.children) == 1
+
+    plugin_children = lib_children.children[0]
+
+    assert plugin_children.addChild.call_count == 4, \
+        f"Expected 4 plugin children, got {plugin_children.addChild.call_count}"
 
 
 def test_load_available_plugins_groups_entries_by_library(setup_plugins: LibraryManager) -> None:
@@ -451,7 +427,7 @@ def test_load_available_plugins_groups_entries_by_library(setup_plugins: Library
     assert "MockLib" in entries_by_library
     assert isinstance(entries_by_library["MockLib"], dict)
     assert any(
-        entry["ClassName"] == "MockControllerPlugin"
+        entry["PluginName"] == "MockLib::MockControllerPlugin"
         for group_entries in entries_by_library["MockLib"].values()
         for entry in group_entries
     )
@@ -518,7 +494,7 @@ def test_remove_subcomponent_removes_only_subcomponent(setup_plugins: LibraryMan
     assert child2 is not None
 
     # Remove the first subcomponent
-    ws.remove_subcomponent(parent_component.id, "ctl1", child1.id)
+    ws.remove_subcomponent(parent_component.id, "ctl1", child1.id, handle_parent_update=True)
 
     assert not child1.folder.exists()
     assert child2.folder.exists()
@@ -529,6 +505,74 @@ def test_remove_subcomponent_removes_only_subcomponent(setup_plugins: LibraryMan
     assert "ctl1" not in parent_after_removal.subcomponents
     assert "ctl2" in parent_after_removal.subcomponents
 
+def test_assign_subcomponent_to_parent_then_remove(setup_plugins: LibraryManager, tmp_path: Path) -> None:
+
+    ws : Workspace = create_workspace(
+        tmp_path / "assign_subcomponent_workspace",
+        name="assign_subcomponent_workspace")
+
+    parent_component = ws.create_component(
+        component_name="parent_component",
+        plugin_name="MockLib::MockControllerWithSingleComponentPlugin"
+    )
+
+    child_component = ws.create_component(
+        component_name="child_component",
+        plugin_name="MockLib::MockControllerPlugin"
+    )
+
+    parent_component, new_child = ws.assign_subcomponent_to_parent(
+        parent_component_id_or_name=parent_component.id,
+        slot_name="ctl1",
+        subcomponent_id=child_component.id
+    )
+
+    assert new_child is not None
+    assert isinstance(new_child, LinkedComponentRecord)
+    assert new_child.parent_component_info.id == parent_component.id
+    assert new_child.id != child_component.id  # Ensure the linked component has a different ID
+
+    components = ws.get_part_records()
+    assert new_child.id in components
+    assert child_component.id in components
+
+    ws.remove_component(new_child.id)
+
+    components = ws.get_part_records()
+    assert new_child.id not in components  # The linked component should be removed
+    assert child_component.id in components  # The original child component should still exist
+    assert not new_child.folder.exists()
+    assert child_component.folder.exists()  # The original child component should still exist
+    assert parent_component.folder.exists()  # The parent component should still exist
+
+
+def test_assign_subcomponent_to_parent_then_remove_linked_component_raises(
+        setup_plugins: LibraryManager, tmp_path: Path) -> None:
+
+    ws : Workspace = create_workspace(
+        tmp_path / "assign_subcomponent_workspace",
+        name="assign_subcomponent_workspace")
+
+    parent_component = ws.create_component(
+        component_name="parent_component",
+        plugin_name="MockLib::MockControllerWithSingleComponentPlugin"
+    )
+
+    child_component = ws.create_component(
+        component_name="child_component",
+        plugin_name="MockLib::MockControllerPlugin"
+    )
+
+    parent_component, new_child = ws.assign_subcomponent_to_parent(
+        parent_component_id_or_name=parent_component.id,
+        slot_name="ctl1",
+        subcomponent_id=child_component.id
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        ws.remove_component(child_component.id)
+
+    assert "Cannot remove component" in str(exc_info.value)
 
 def test_duplicate_component_simple(setup_plugins: LibraryManager, tmp_path: Path) -> None:
 
@@ -643,3 +687,59 @@ def test_duplicate_component_with_recursive_subcomponents(setup_plugins: Library
         assert ch.id in [duplicated_child1.id, duplicated_child2.id]
 
     assert duplicated_child2.subcomponents["ctl1"].id == duplicated_child_of_child2.id
+
+
+def test_duplicate_component_with_linked_subcomponent(setup_plugins: LibraryManager, tmp_path: Path) -> None:
+
+    ws : Workspace = create_workspace(
+        tmp_path / "duplicate_linked_subcomponent_workspace",
+        name="duplicate_linked_subcomponent_workspace")
+
+    parent_component = ws.create_component(
+        component_name="parent_component",
+        plugin_name="MockLib::MockControllerWithSingleComponentPlugin"
+    )
+
+    child_component = ws.create_component(
+        component_name="child_component",
+        plugin_name="MockLib::MockControllerPlugin"
+    )
+
+    parent_component, linked_child = ws.assign_subcomponent_to_parent(
+        parent_component_id_or_name=parent_component.id,
+        slot_name="ctl1",
+        subcomponent_id=child_component.id
+    )
+
+    components = ws.get_part_records()
+
+    assert len(components) == 3
+
+    # Duplication of linked component should raise an error
+    with pytest.raises(ValueError) as excinfo:
+        ws.duplicate_component(linked_child.id, new_name="duplicated_linked_child")
+
+    assert "Cannot duplicate a linked component" in str(excinfo.value)
+
+    components = ws.get_part_records()
+
+    assert len(components) == 3  # Ensure no new components were created
+
+    duplicated = ws.duplicate_component(parent_component.id, new_name="duplicated_parent_with_linked_child")
+
+    components = ws.get_part_records()
+
+    assert len(components) == 5  # Parent and linked child should be duplicated, so total count increases by 2
+
+    assert duplicated is not None
+    assert duplicated.name == "duplicated_parent_with_linked_child"
+    assert duplicated.folder.exists()
+
+    assert duplicated.folder != parent_component.folder
+
+    duplicated_linked_child = ws.get_subcomponent(duplicated.id, "ctl1")
+
+    assert duplicated_linked_child is not None
+    assert duplicated_linked_child.folder.exists()
+    assert duplicated_linked_child.id != linked_child.id
+    assert duplicated_linked_child.linked_component_id == child_component.id

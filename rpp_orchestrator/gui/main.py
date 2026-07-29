@@ -69,6 +69,7 @@ def main(workspace_root: Path | None = None) -> int:
     set_pallette_and_style_to_app(app)
 
     window = WorkspaceWindow()
+
     if workspace_root is not None:
         workspace = Workspace(root=Path(workspace_root).expanduser().resolve())
         workspace.ensure_layout()

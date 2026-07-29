@@ -1,20 +1,15 @@
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from enum import unique
-from operator import is_
 from pathlib import Path
 import json
-import re
 from typing import Any, Generator
+from uuid import uuid4
 
-from .component_storage import ComponentDataStore, ComponentParameterStore, ComponentRecord
+from .component_storage import ComponentDataStore, ComponentParameterStore, ComponentRecord, LinkedComponentRecord
 from rpp_plugin_registrator.library_manager import LibraryManager
-from rpp_plugin_registrator.plugin_descriptors import parse_plugin_file
 from .script_handle import (
     ScriptHandle,
-    script_class_name_from_name,
+    get_script_language_from_path,
     SCRIPT_LANGUAGES,
     DEFAULT_SCRIPT_LANGUAGE,
     language_spec,
@@ -50,6 +45,7 @@ class Workspace:
 
     def __init__(self, root: Path, lib_manager: LibraryManager | None = None) -> None:
         self.root = root.expanduser().resolve()
+        self.rppws_folder = self.root / ".rppws"
         self.lib_manager = lib_manager or LibraryManager()
         self.component_data_store = ComponentDataStore(self.parts_path, lib_manager=self.lib_manager)
         self.part_records: dict[str, ComponentRecord] = {}
@@ -64,31 +60,28 @@ class Workspace:
         return self.root.name
 
     @property
-    def scripts_path(self) -> Path:
-        return self.root / self.script_dir_name
-
-    @property
     def script_descriptions_path(self) -> Path:
-        return self.root / self.script_descriptions_dir_name
+        return self.rppws_folder / self.script_descriptions_dir_name
 
     @property
     def parts_path(self) -> Path:
-        return self.root / self.parts_dir_name
+        return self.rppws_folder / self.parts_dir_name
 
     @property
     def data_path(self) -> Path:
-        return self.root / self.data_dir_name
+        return self.rppws_folder / self.data_dir_name
 
     @property
     def builds_path(self) -> Path:
-        return self.root / self.builds_dir_name
+        return self.rppws_folder / self.builds_dir_name
 
     @property
     def logs_path(self) -> Path:
-        return self.root / self.logs_dir_name
+        return self.rppws_folder / self.logs_dir_name
 
 
-    def get_component(self, component_id_or_name: str) -> ComponentRecord:
+    def get_component(self, component_id_or_name: str) \
+            -> ComponentRecord | LinkedComponentRecord:
         if component_id_or_name in self.part_records:
             return self.part_records[component_id_or_name]
         for record in self.part_records.values():
@@ -96,7 +89,8 @@ class Workspace:
                 return record
         raise ValueError(f"Component not found: {component_id_or_name}")
 
-    def get_subcomponent(self, parent_component_id_or_name: str, slot_name: str) -> ComponentRecord | None:
+    def get_subcomponent(self, parent_component_id_or_name: str, slot_name: str) \
+            -> ComponentRecord | LinkedComponentRecord | None:
         parent_record = self.get_component(parent_component_id_or_name)
         if not parent_record:
             raise ValueError(f"Parent component not found: {parent_component_id_or_name}")
@@ -110,16 +104,12 @@ class Workspace:
 
 
 
-    def write_script(self, script_name: str, source: str, filename: str | None = None, language: str = DEFAULT_SCRIPT_LANGUAGE) -> Path:
-        self.scripts_path.mkdir(parents=True, exist_ok=True)
-        extension = language_spec(language).extension
-        target = self.scripts_path / (filename or f"{script_name}{extension}")
-        target.write_text(source, encoding="utf-8")
-        return target
+    def write_script(self, script_path: Path, source: str) -> Path:
+        script_path.write_text(source, encoding="utf-8")
+        return script_path
 
     def ensure_layout(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
-        self.scripts_path.mkdir(parents=True, exist_ok=True)
         self.script_descriptions_path.mkdir(parents=True, exist_ok=True)
         self.parts_path.mkdir(parents=True, exist_ok=True)
         self.data_path.mkdir(parents=True, exist_ok=True)
@@ -130,125 +120,117 @@ class Workspace:
         self.parts_path.mkdir(parents=True, exist_ok=True)
 
     def list_scripts(self) -> list[ScriptHandle]:
-        self.scripts_path.mkdir(parents=True, exist_ok=True)
         scripts = []
-        for script_file in self.scripts_path.iterdir():
-            if script_file.is_file() and script_file.suffix in {spec.extension for spec in SCRIPT_LANGUAGES.values()}:
-                language = next((lang for lang, spec in SCRIPT_LANGUAGES.items() if spec.extension == script_file.suffix), None)
-                scripts.append(ScriptHandle(path=script_file, ws=self, language=language))
+        script_descriptions_path = self.script_descriptions_path
+        for script_file in script_descriptions_path.iterdir():
+            if script_file.is_file() and script_file.suffix == ".json":
+                json_data = _json_load(script_file)
+                script_path = json_data.get("ScriptPath")
+                if not Path(script_path).exists():
+                    script_file.unlink()  # Remove the description if the script file doesn't exist
+                    continue
+                language = json_data.get("Language")
+                scripts.append(ScriptHandle(path=Path(script_path), ws=self, language=language))
         return scripts
 
 
     def ensure_script_assignments(self, script_path: Path) -> None:
-        assignments_path = self._script_assignments_path(script_path)
+        assignments_path = self.get_script_description_path(script_path)
         if not assignments_path.exists():
-            self.write_script_component_assignments(script_path, {})
+            self.write_script_description(script_path, DEFAULT_SCRIPT_LANGUAGE, {})
+
+
+    def load_script(self, script_path: Path) -> ScriptHandle:
+        if not script_path.exists():
+            raise FileNotFoundError(f"Script file does not exist: {script_path}")
+        language = next((lang for lang, spec in SCRIPT_LANGUAGES.items() if spec.extension == script_path.suffix), None)
+        return ScriptHandle(path=script_path, ws=self, language=language)
 
     def create_script(self,
-            script_name: str, source: str | None = None,
+            script_path_or_name: Path | str, source: str | None = None,
             language: str = DEFAULT_SCRIPT_LANGUAGE) -> ScriptHandle:
-        self.scripts_path.mkdir(parents=True, exist_ok=True)
-        extension = Path(script_name).suffix
+
+        script_path_or_name = Path(script_path_or_name)
+        if not script_path_or_name.is_absolute():
+            script_path = self.root / script_path_or_name
+        else:
+            script_path = script_path_or_name
+        extension = script_path.suffix
+        language = get_script_language_from_path(script_path) if extension else language
+        if not extension:
+            extension = language_spec(language).extension
+            script_path = script_path.with_suffix(extension)
+
+
+        if not script_path.relative_to(self.root):
+            raise ValueError(f"Script path must be within the scripts directory: {self.root}")
         if extension:
             if extension not in {spec.extension for spec in SCRIPT_LANGUAGES.values()}:
                 raise ValueError(f"Invalid script extension: {extension}")
-            script_name = Path(script_name).stem
-            target = self.scripts_path / f"{script_name}{extension}"
+            script_name = script_path.stem
         else:
             script_name = Path(script_name).stem
             extension = language_spec(language).extension
-            target = self.scripts_path / f"{script_name}{extension}"
         if source is not None:
-            target.write_text(source, encoding="utf-8")
+            script_path.write_text(source, encoding="utf-8")
         else:
-            name = script_class_name_from_name(script_name)
-            default_source = default_script_source(name, language=language)
-            target.write_text(default_source, encoding="utf-8")
-        self.write_script_component_assignments(target, {})
-        return ScriptHandle(path=target, ws=self, language=language)
+            default_source = default_script_source(script_path=script_path)
+            script_path.write_text(default_source, encoding="utf-8")
+        self.write_script_description(script_path, language, {})
+        return ScriptHandle(path=script_path, ws=self, language=language)
 
     def delete_script(self, script_path: Path) -> None:
         if script_path.exists():
             script_path.unlink()
-
-    def parse_plugin_and_get_parameters(self, plugin_info: dict[str, Any]) -> dict[str, Any]:
-        plugin_file_relative_to_library = plugin_info.get("PluginPath")
-        library = plugin_info.get("Library")
-        class_name = plugin_info.get("ClassName")
-        plugin_file = self.lib_manager.get_plugin_path_absolute(plugin_file_relative_to_library, library)
-        parsed = parse_plugin_file(plugin_file)
-        if not parsed.is_valid or not parsed.data.plugins:
-            raise ValueError(f"Failed to parse plugin '{plugin_file}' for component creation.")
-        for plugin_desc in parsed.data.plugins:
-            if plugin_desc["ClassName"] == class_name:
-                parameters = plugin_desc.get("ParamDescription", [])
-                break
-        return parameters
 
     def create_component(
         self,
         component_name: str,
         plugin_name: str,
         *,
-        parameters: dict[str, Any] | list[Any] | None = None,
         overwrite: bool = False,
     ) -> ComponentRecord:
         self.ensure_parts_layout()
         unique_name = self.resolve_unique_component_name(component_name)
         info = self.lib_manager.get_plugin_info_from_lib(plugin_name)
-        if parameters is None:
-            parameters = self.parse_plugin_and_get_parameters(info)
 
         record = self.component_data_store.create_component_folder(
             unique_name, info,
-            overwrite=overwrite,
-            parameters=parameters
+            overwrite=overwrite
         )
         self.part_records[record.id] = record
         return record
 
-    def assign_subcomponent(
+    def create_subcomponent(
         self,
         parent_folder: Path,
         slot_name: str,
         component_name: str,
         plugin_name: str,
-        *,
-        parameters: dict[str, Any] | list[Any] | None = None,
     ) -> ComponentRecord:
 
         parent_record = self.component_data_store.load_description(parent_folder)
-        parent_plugin_info = self.lib_manager.get_plugin_info_from_lib(parent_record.plugin_name)  # Ensure plugin is loaded
+        subcomponent_info = \
+            self.lib_manager.get_plugin_info_from_lib(plugin_name)
 
-        metadata = parent_plugin_info.get("PluginMetadata", {})
-        components = metadata.get("Components", {})
-        if slot_name not in components:
-            raise ValueError(f"Plugin '{parent_record.plugin_name}' does not have a component slot named '{slot_name}'")
-
-        subcomponent_info = self.lib_manager.get_plugin_info_from_lib(plugin_name)
-
-        slot_type = components[slot_name]
+        slot_type, allow_list, overwrite = \
+            self._get_slot_type_from_plugin(parent_record.plugin_name, slot_name)
 
         # overwrite component if it is not specified as a list in COMPONENTS field of the parent plugin
-        allow_list = False
-        overwrite = True
-        if isinstance(slot_type, list):
-            slot_type = slot_type[0]
-            allow_list = True
-            overwrite = False
 
         if slot_type != subcomponent_info["PluginType"]:
-            raise ValueError(f"Plugin '{plugin_name}' has an invalid type for subcomponent field '{slot_name}'")
+            raise ValueError(f"Plugin '{plugin_name}'"
+                + f" has an invalid type for subcomponent field '{slot_name}'")
 
         component_name = self.resolve_unique_component_name(component_name)
-        parent_record, child_record = self.component_data_store.create_subcomponent_folder(
-            parent_record.folder,
-            slot_name,
-            component_name=component_name,
-            plugin_info_or_name=subcomponent_info,
-            parameters=parameters,
-            overwrite=overwrite,
-            allow_list=allow_list
+        parent_record, child_record = \
+            self.component_data_store.create_subcomponent_folder(
+                parent_record.folder,
+                slot_name,
+                component_name=component_name,
+                plugin_info_or_name=subcomponent_info,
+                overwrite=overwrite,
+                allow_list=allow_list
         )
 
         self.component_data_store.save_description(child_record.folder, child_record)
@@ -257,14 +239,62 @@ class Workspace:
         self.part_records[parent_record.id] = parent_record
         return child_record
 
+    def assign_subcomponent_to_parent(self,
+            parent_component_id_or_name: str, slot_name: str,
+            subcomponent_id: str) -> None:
+
+        parent_record = self.get_part_record_by_id(parent_component_id_or_name)
+        if not parent_record:
+            raise ValueError(
+                f"Parent component with id '{parent_component_id_or_name}' not found.")
+        child_record = self.get_part_record_by_id(subcomponent_id)
+        if not child_record:
+            raise ValueError(
+                f"Subcomponent with id '{subcomponent_id}' not found.")
+
+        slot_type, allow_list, overwrite = \
+            self._get_slot_type_from_plugin(parent_record.plugin_name, slot_name)
+
+        if slot_type != child_record.plugin_type:
+            raise ValueError(f"Plugin '{child_record.plugin_name}'"
+                + f" has an invalid type for subcomponent field '{slot_name}'"
+                + f" of parent plugin '{parent_record.plugin_name}'")
+
+        parent_subcomponent_spec = parent_record.subcomponent_spec
+        if slot_name not in parent_subcomponent_spec:
+            raise ValueError(
+                f"Slot '{slot_name}' not found in parent component '{parent_record.id}'.")
+
+        parent_subcomponent_info = parent_subcomponent_spec[slot_name]
+
+        if not allow_list and isinstance(parent_subcomponent_info, list):
+            raise ValueError(
+                f"Slot '{slot_name}' in parent component '{parent_record.id}'"
+                + " does not allow multiple subcomponents.")
+
+        parent_record, new_child = \
+            self.component_data_store.create_linked_subcomponent_folder(
+                parent_record, slot_name, child_record,
+                overwrite=overwrite, allow_list=allow_list
+            )
+        self.part_records[new_child.id] = new_child
+        self.part_records[parent_record.id] = parent_record
+
+        self.component_data_store.save_description(new_child.folder, new_child)
+        self.component_data_store.save_description(parent_record.folder, parent_record)
+
+        return parent_record, new_child
+
     def resolve_unique_component_name(self, requested_name: str) -> str:
         names = {record.name for record in self.part_records.values()}
         return _unique_name(requested_name, names)
 
-    def read_part_descriptor(self, folder: Path) -> ComponentRecord:
+    def read_part_descriptor(self, folder: Path) \
+            -> ComponentRecord | LinkedComponentRecord:
         return self.component_data_store.load_description(folder)
 
-    def write_part_descriptor(self, folder: Path, record: ComponentRecord) -> Path:
+    def write_part_descriptor(self, folder: Path,
+            record: ComponentRecord) -> Path:
         return self.component_data_store.save_description(folder, record)
 
     def part_descriptor_path(self, folder: Path) -> Path:
@@ -279,38 +309,47 @@ class Workspace:
     def get_part_records(self) -> dict[str, ComponentRecord]:
         return self.part_records
 
-    def iterate_part_records(self) -> Generator[ComponentRecord, None, None]:
+    def get_linked_component(self,
+            link_record: LinkedComponentRecord) -> ComponentRecord | None:
+        return self.get_part_record_by_id(link_record.linked_component_id)
+
+
+    def iterate_part_records(self, root_only: bool = False) \
+            -> Generator[ComponentRecord, None, None]:
         for record in self.part_records.values():
-            if record is not None:
+            if record is not None \
+                    and (not root_only or record.parent_component_info is None):
                 yield record
 
     def get_part_record_by_id(self, part_id: str) -> ComponentRecord | None:
         return self.part_records.get(part_id)
 
-    def rename_script(self, script_path: Path, new_name: str, language: str | None = None) -> Path:
-        ext = language_spec(language or self.default_script_language).extension if language else script_path.suffix
+    def rename_script(self,
+            script_path: Path, new_name: str, language: str | None = None) -> Path:
+        ext = language_spec(language or self.default_script_language).extension \
+            if language else script_path.suffix
         target = script_path.with_name(f"{new_name}{ext}")
         if target.exists():
             raise FileExistsError(f"Target script already exists: {target}")
         script_path.rename(target)
         return target
 
-    def _script_assignments_path(self, script_path: Path) -> Path:
+    def get_script_description_path(self, script_path: Path) -> Path:
         self.script_descriptions_path.mkdir(parents=True, exist_ok=True)
         return self.script_descriptions_path / f"{script_path.stem}.json"
 
-    def read_script_component_assignments(self, script_path: Path) -> dict[str, list[str]]:
-        assignments_path = self._script_assignments_path(script_path)
+    def read_script_description(self, script_path: Path) -> dict[str, list[str]]:
+        assignments_path = self.get_script_description_path(script_path)
         if assignments_path.exists():
             try:
                 payload = json.loads(assignments_path.read_text(encoding="utf-8"))
-                if isinstance(payload, dict) and "Components" in payload:
-                    return payload["Components"]
+                return payload
             except (json.JSONDecodeError, OSError):
                 pass
         return None
 
-    def remove_component_from_script(self, script_h: ScriptHandle, component_id: str, component_key: str | None) -> None:
+    def remove_component_from_script(self,
+            script_h: ScriptHandle, component_id: str, component_key: str | None) -> None:
         removed_id = component_id.strip()
         if not removed_id:
             raise ValueError("Component ID to remove cannot be empty.")
@@ -320,7 +359,8 @@ class Workspace:
         else:
             key = None
 
-        assignments = self.read_script_component_assignments(script_h.path)
+        description = self.read_script_description(script_h.path)
+        assignments = description.get("Components", {}) if description else {}
         if key is not None:
             component_ids = assignments.get(key)
             if not component_ids:
@@ -338,56 +378,82 @@ class Workspace:
                     if not assignments[k]:
                         assignments.pop(k, None)
 
-        assignments_path = self._script_assignments_path(script_h.path)
-        payload = self.build_assignments_payload(script_h.path, assignments)
-        assignments_path.write_text(
-            json.dumps(payload, indent=4, sort_keys=False),
-            encoding="utf-8",
-        )
+        self.write_script_description(script_h.path, script_h.language, assignments)
 
     def remove_component(self, record_id: str) -> None:
         component_record = self.get_part_record_by_id(record_id)
         if not component_record:
             raise ValueError(f"Component with id '{record_id}' not found.")
 
-        # remove the component from scripts
-        for script_h in self.list_scripts():
-            self.remove_component_from_script(script_h, component_id=component_record.id, component_key=None)
+        # if the component is not a subcomponent, remove it from scripts
+        parent_component_info = component_record.parent_component_info
+        is_subcomponent = parent_component_info is not None
+        if is_subcomponent:
+            return self.remove_subcomponent(
+                parent_component_id_or_name=parent_component_info.id,
+                slot_name=parent_component_info.slot_name,
+                subcomponent_id=component_record.id,
+                handle_parent_update=True
+            )
 
+        if not self.can_remove_component(record_id):
+            raise ValueError(f"Cannot remove component '{record_id}' "
+                + "because it is assigned to scripts or has subcomponents.")
+
+        for script_h in self.list_scripts():
+            self.remove_component_from_script(script_h,
+                    component_id=component_record.id, component_key=None)
+
+        for key, subcomponent in component_record.subcomponents.items():
+            if not isinstance(subcomponent, list):
+                subcomponent = [subcomponent]
+            for subc in subcomponent:
+                self.remove_subcomponent(
+                    record_id, key, subc.id, handle_parent_update=False)
         self.component_data_store.remove_component_folder(component_record.folder)
         self.part_records.pop(component_record.id, None)
 
-    def remove_subcomponent(self, parent_component_id_or_name: str, slot_name: str, subcomponent_id: str) -> None:
+    def remove_subcomponent(self,
+            parent_component_id_or_name: str, slot_name: str,
+            subcomponent_id: str, handle_parent_update: bool = False) -> None:
         parent_component = self.get_part_record_by_id(parent_component_id_or_name)
         if not parent_component:
-            raise ValueError(f"Parent component with id '{parent_component_id_or_name}' not found.")
+            raise ValueError(
+                f"Parent component with id '{parent_component_id_or_name}' not found.")
 
         if slot_name not in parent_component.subcomponents:
-            raise ValueError(f"Slot '{slot_name}' not found in parent component '{parent_component.id}'.")
+            raise ValueError(
+                f"Slot '{slot_name}' not found in parent component '{parent_component.id}'.")
 
         msg = f"Subcomponent with id '{subcomponent_id}' not found in slot" + \
                 f"'{slot_name}' of parent component '{parent_component.id}'."
-        if not self.check_subcomponent_in_slot(parent_component.subcomponents, slot_name, subcomponent_id):
+        if not self.check_subcomponent_in_slot(
+                parent_component.subcomponents, slot_name, subcomponent_id):
             raise ValueError(msg)
 
-        parent_component.subcomponents = \
-            self.remove_subcomponent_from_slot(parent_component.subcomponents, slot_name, subcomponent_id)
+        if handle_parent_update:
+            parent_component.subcomponents = \
+                self.remove_subcomponent_from_slot(
+                    parent_component.subcomponents, slot_name, subcomponent_id)
+            self.component_data_store.save_description(
+                parent_component.folder, parent_component)
 
-        self.component_data_store.remove_subcomponent_folder(self.get_part_record_by_id(subcomponent_id).folder)
-        self.component_data_store.save_description(parent_component.folder, parent_component)
+        self.component_data_store.remove_subcomponent_folder(
+            self.get_part_record_by_id(subcomponent_id).folder)
         self.part_records.pop(subcomponent_id, None)
 
-
-
-    def remove_subcomponent_from_slot(self, parent_subcomponents, slot_name, subcomponent_id: str) -> None:
+    def remove_subcomponent_from_slot(self,
+            parent_subcomponents, slot_name, subcomponent_id: str) -> None:
         slot_subcomponents = parent_subcomponents[slot_name]
         if isinstance(slot_subcomponents, list):
-            parent_subcomponents[slot_name] = [sub for sub in slot_subcomponents if sub.id != subcomponent_id]
+            parent_subcomponents[slot_name] = \
+                [sub for sub in slot_subcomponents if sub.id != subcomponent_id]
         else:
             parent_subcomponents.pop(slot_name, None)
         return parent_subcomponents
 
-    def check_subcomponent_in_slot(self, parent_subcomponents, slot_name, subcomponent_id: str) -> bool:
+    def check_subcomponent_in_slot(self,
+            parent_subcomponents, slot_name, subcomponent_id: str) -> bool:
         slot_subcomponents = parent_subcomponents[slot_name]
         if isinstance(slot_subcomponents, list):
             if subcomponent_id in [sub.id for sub in slot_subcomponents]:
@@ -405,6 +471,9 @@ class Workspace:
         if not component_record:
             raise ValueError(f"Component with id '{record_id}' not found.")
 
+        if isinstance(component_record, LinkedComponentRecord):
+            raise ValueError(f"Cannot duplicate a linked component: {record_id}")
+
         duplicated_folder, duplicated_records = \
             self.component_data_store.duplicate_component_folder(component_record.folder, new_name)
 
@@ -414,9 +483,10 @@ class Workspace:
         duplicated_record = self.component_data_store.load_description(duplicated_folder)
         return duplicated_record
 
-    def write_script_component_assignments(self, script_path: Path, assignments: dict[str, list[str]]) -> None:
-        assignments_path = self._script_assignments_path(script_path)
-        payload = self.build_assignments_payload(script_path, assignments)
+    def write_script_description(self,
+            script_path: Path, language: str, assignments: dict[str, list[str]]) -> None:
+        assignments_path = self.get_script_description_path(script_path)
+        payload = self.build_assignments_payload(script_path, language, assignments)
         assignments_path.write_text(
             json.dumps(payload, indent=4, sort_keys=False),
             encoding="utf-8",
@@ -427,7 +497,8 @@ class Workspace:
         target.write_text(source, encoding="utf-8")
         return target
 
-    def assign_component_to_script(self, script_h: ScriptHandle, component_key: str, record_id: str) -> None:
+    def assign_component_to_script(self,
+            script_h: ScriptHandle, component_key: str, record_id: str) -> None:
         """
         Assign a component to a script by updating the COMPONENTS dict in the script file.
         Uses read_script_components and write_script_components helpers.
@@ -435,13 +506,16 @@ class Workspace:
         if not script_h.path.exists():
             raise FileNotFoundError(f"Script not found: {script_h.path}")
 
-        components = self.read_script_component_assignments(script_h.path)
+        description = self.read_script_description(script_h.path)
         # Append to list for this key, or create new list
+        components = description.get("Components", {}) if description else {}
         existing = components.get(component_key)
         record = self.get_part_record_by_id(record_id)
 
         if record.plugin_type != script_h.slots.get(component_key):
-            raise ValueError(f"Plugin type '{record.plugin_name}' does not match slot type '{script_h.slots.get(component_key)}' for slot '{component_key}'.")
+            raise ValueError(f"Plugin type '{record.plugin_name}'"
+                + f" does not match slot type '{script_h.slots.get(component_key)}'"
+                + f" for slot '{component_key}'.")
 
         if isinstance(existing, list):
             if record.id not in existing:
@@ -455,12 +529,45 @@ class Workspace:
                 components[component_key] = [existing]
         else:
             components[component_key] = [record.id]
-        self.write_script_component_assignments(script_h.path, components)
+        self.write_script_description(script_h.path, script_h.language, components)
 
-    def build_assignments_payload(self, script_handle, assignments):
+    def build_assignments_payload(self, script_path, language, assignments):
         return {
+            "ScriptPath": str(script_path),
+            "Language": language,
             "Components": assignments,
         }
+
+    def can_remove_component(self, record_id: str) -> bool:
+        for c in self.part_records.values():
+            if isinstance(c, LinkedComponentRecord) and c.linked_component_id == record_id:
+                return False
+        return True
+
+
+
+    def _get_slot_type_from_plugin(self, plugin_name: str, slot_name: str) -> str | None:
+        parent_plugin_info = \
+            self.lib_manager.get_plugin_info_from_lib(plugin_name)
+
+        metadata = parent_plugin_info.get("PluginMetadata", {})
+        components = metadata.get("Components", {})
+        if slot_name not in components:
+            raise ValueError(f"Plugin '{plugin_name}'"
+                + f" does not have a component slot named '{slot_name}'")
+        if slot_name not in components:
+            raise ValueError(f"Plugin '{plugin_name}'"
+                + f" does not have a component slot named '{slot_name}'")
+
+        slot_type = components[slot_name]
+        allow_list = False
+        overwrite = True
+        if isinstance(slot_type, list):
+            slot_type = slot_type[0]
+            allow_list = True
+            overwrite = False
+
+        return slot_type, allow_list, overwrite
 
     def _load_part_records(self):
         self.ensure_parts_layout()
@@ -470,30 +577,31 @@ class Workspace:
             component_record = self.component_data_store.load_description(record_path.parent)
             self.part_records[component_record.id] = component_record
 
-
-
 def open_workspace(ws_path: str | Path) -> Workspace:
     root_path = Path(ws_path).expanduser().resolve()
     if not root_path.exists() or not root_path.is_dir():
-        raise FileNotFoundError(f"Workspace root does not exist or is not a directory: {root_path}")
+        raise FileNotFoundError(
+            f"Workspace root does not exist or is not a directory: {root_path}")
     workspace = Workspace(root=root_path)
     return workspace
 
 def create_workspace(root: str | Path, name: str | None = None, overwrite: bool = False) -> Workspace:
     root_path = Path(root).expanduser().resolve()
     if root_path.exists() and any(root_path.iterdir()) and not overwrite:
-        raise FileExistsError(f"Workspace root already exists and is not empty: {root_path}")
+        raise FileExistsError(
+            f"Workspace root already exists and is not empty: {root_path}"
+        )
 
     root_path.mkdir(parents=True, exist_ok=True)
     workspace = Workspace(root=root_path)
     workspace.ensure_layout()
-    default_script_name = name or workspace.name
+    default_script_name = name or f"new_{workspace.name}_script"
     extension = language_spec(workspace.default_script_language).extension
-    default_script = workspace.scripts_path / f"{default_script_name}{extension}"
+    default_script = workspace.root / f"{default_script_name}{extension}"
     if not default_script.exists():
         workspace.create_script(
-            default_script_name,
-            default_script_source(script_class_name_from_name(default_script_name), language=workspace.default_script_language),
+            script_path_or_name=default_script,
+            source=default_script_source(script_path=default_script),
             language=workspace.default_script_language,
         )
     return workspace

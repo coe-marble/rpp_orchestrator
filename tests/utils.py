@@ -3,7 +3,10 @@ from typing import Generator
 from rpp_plugin_registrator.library_manager import LibraryManager
 from rpp_orchestrator.workspace import create_workspace
 
+
 def setup_test_plugins(rpp_home) -> LibraryManager:
+
+
     manager = LibraryManager(rpp_home=rpp_home)
     handle = manager.get_or_create_plugin_library("MockLib")
 
@@ -33,11 +36,13 @@ def setup_test_plugins(rpp_home) -> LibraryManager:
         "\n".join(
             [
                 "from rpp_plugin_types.rpp_common import DisturbanceGenerator2D",
-                "",
+                "from rpp_py.plugin import ParameterDescription",
                 "class MockDisturbanceGeneratorPlugin(DisturbanceGenerator2D):",
-                "    COMPONENTS = {",
-                "        \"ctl1\": \"rpp_common::MotionController2D\",",
-                "    }",
+                "    PARAMETERS = [",
+                "        ParameterDescription(name=\"param1\", default_value=0.0),",
+                "        ParameterDescription(name=\"param2\", default_value=1.0),",
+                "        ParameterDescription(name=\"param3\", default_value=True),",
+                "    ]",
                 "    tag = \"mock_dist\"",
                 "",
                 "    def name(self) -> str:",
@@ -132,75 +137,65 @@ def create_mock_workspace(tmp_path: Path, rpp_home: Path) -> Path:
     parent_record = workspace.create_component(
         component_name="parent_component",
         plugin_name="MockLib::MockControllerWithSingleComponentPlugin",
-        parameters={"param1": "value1"},
     )
     component2_record = workspace.create_component(
         component_name="component2",
         plugin_name="MockLib::MockControllerPlugin",
-        parameters={"param1": "value1"},
     )
-    child_record = workspace.assign_subcomponent(
+    child_record = workspace.create_subcomponent(
         parent_folder=parent_record.folder,
         slot_name="ctl1",
         component_name="subcomponent1",
         plugin_name="MockLib::MockControllerPlugin",
-        parameters={"param1": "value1"},
     )
 
     parent2_record = workspace.create_component(
         component_name="parent2_component",
         plugin_name="MockLib::MockControllerWithMultipleComponentsPlugin",
-        parameters={"param1": "value1"},
     )
 
     parent3_record = workspace.create_component(
         component_name="parent3_component",
         plugin_name="MockLib::MockControllerWithSingleComponentListPlugin",
-        parameters={"param1": "value1"},
     )
 
-    parent2_child1_record = workspace.assign_subcomponent(
+    parent2_child1_record = workspace.create_subcomponent(
         parent_folder=parent2_record.folder,
         slot_name="ctl1",
         component_name="parent2_child1",
         plugin_name="MockLib::MockControllerPlugin",
-        parameters={"param1": "value1"},
     )
 
-    parent2_child2_record = workspace.assign_subcomponent(
+    parent2_child2_record = workspace.create_subcomponent(
         parent_folder=parent2_record.folder,
         slot_name="ctl2",
         component_name="parent2_child2",
         plugin_name="MockLib::MockControllerPlugin",
-        parameters={"param1": "value1"},
     )
 
-    parent3_child1_record = workspace.assign_subcomponent(
+    parent3_child1_record = workspace.create_subcomponent(
         parent_folder=parent3_record.folder,
         slot_name="ctl1",
         component_name="parent3_child1",
         plugin_name="MockLib::MockControllerPlugin",
-        parameters={"param1": "value1"},
     )
 
-    parent3_child2_record = workspace.assign_subcomponent(
+    parent3_child2_record = workspace.create_subcomponent(
         parent_folder=parent3_record.folder,
         slot_name="ctl1",
         component_name="parent3_child2",
         plugin_name="MockLib::MockControllerWithSingleComponentPlugin",
-        parameters={"param1": "value1"},
     )
 
-    child_of_child_record = workspace.assign_subcomponent(
+    child_of_child_record = workspace.create_subcomponent(
         parent_folder=parent3_child2_record.folder,
         slot_name="ctl1",
         component_name="child_of_child",
         plugin_name="MockLib::MockControllerPlugin",
-        parameters={"param1": "value1"},
     )
 
     workspace.create_script(
-        script_name="example.py", source=example_source()
+        script_path_or_name="example.py", source=example_source()
     )
 
     return workspace
@@ -218,7 +213,7 @@ from rpp_plugin_types.rpp_common import DisturbanceGenerator2D
 
 
 
-class MockWorkspace(OrchestrationScript):
+class Example(OrchestrationScript):
     COMPONENTS = {
         "ctl_main": "rpp_common::MotionController2D",
         "ctl_disturbance": "rpp_common::DisturbanceGenerator2D",
