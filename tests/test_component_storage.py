@@ -239,7 +239,7 @@ def test_create_linked_subcomponent_folder_and_remove_linked_subcomponent(new_te
     parent_record_new, linked_subcomponent_record = \
         store.create_linked_subcomponent_folder(parent_record,
                 "linked_subcomponent",
-                child_record)
+                child_record, "NameOfWorkspace")
 
     store.save_description(parent_record_new.folder, parent_record_new)
     store.save_description(linked_subcomponent_record.folder, linked_subcomponent_record)
@@ -249,6 +249,7 @@ def test_create_linked_subcomponent_folder_and_remove_linked_subcomponent(new_te
     assert linked_subcomponent_record.folder.is_dir()
     assert linked_subcomponent_record.linked_component_id == child_record.id
     assert linked_subcomponent_record.name == "child_component"
+    assert linked_subcomponent_record.linked_component_workspace == "NameOfWorkspace"
     assert parent_record_new.subcomponents.get("linked_subcomponent") is not None
 
     store.remove_component_folder(linked_subcomponent_record.folder)

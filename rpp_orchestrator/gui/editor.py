@@ -12,14 +12,13 @@ import shutil as path_shutil
 from typing import Any
 from uuid import uuid4
 
-from PyQt6.QtCore import QSignalBlocker, Qt
+from PyQt6.QtCore import QSignalBlocker, QTimer, Qt
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QDialog,
-    QDialogButtonBox,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QListWidget,
     QListWidgetItem,
@@ -76,6 +75,17 @@ def _open_in_file_explorer(path: Path) -> None:
 
 class WorkspaceEditor(QWidget):
 
+
+    COMPONENT_COLORS = {
+        "component_key": QColor("#CACACA"),
+        "component_instance": QColor("#D9EEFF"),
+        "linked_component_ok": QColor("#D9FFD9"),
+        "linked_component_failed": QColor("#FFCCCC"),
+
+        "plugin_type": QColor("#F3F3F3"),
+    }
+
+
     def eventFilter(self, source, event):
         if event.type() != event.Type.MouseButtonPress:
             return False
@@ -102,6 +112,7 @@ class WorkspaceEditor(QWidget):
         self.current_part_id: str = ""
         self.current_part_saved_name: str = ""
         self.current_part_source: str = ""
+        self.current_part_node_path: tuple[object, ...] = ()
 
         self.script_list = QListWidget(self)
         self.script_list.currentItemChanged.connect(self._on_script_changed)
@@ -111,18 +122,20 @@ class WorkspaceEditor(QWidget):
 
         self.workspace_components_label = QLabel("Workspace Components", self)
         self.workspace_components_tree = QTreeWidget(self)
-        self.workspace_components_tree.setHeaderLabels(["Component", "Plugin Type"])
+        self.workspace_components_tree.setHeaderLabels(["Component"])
         self.workspace_components_tree.setMinimumWidth(300)
         self.workspace_components_tree.setColumnWidth(0, 360)
         self.workspace_components_tree.itemClicked.connect(
             self._on_workspace_component_clicked)
 
+        self.workspace_components_tree.itemDoubleClicked \
+            .connect(self._on_workspace_part_tree_double_clicked)
         self.workspace_components_tree.viewport() \
                 .installEventFilter(self)
 
+
         self.script_part_tree = QTreeWidget(self)
         self.script_part_tree.setHeaderLabels(["Component"])
-        self.script_part_tree.itemDoubleClicked.connect(self._on_script_part_tree_double_clicked)
         self.script_part_tree.itemClicked.connect(self._on_script_part_tree_clicked)
         self.script_part_tree.viewport() \
                 .installEventFilter(self)
@@ -309,8 +322,6 @@ class WorkspaceEditor(QWidget):
         self._load_plugin_types()
         self._load_plugins()
 
-
-
     def open_plugin_manager(self) -> None:
         if self.workspace is None:
             return
@@ -373,15 +384,22 @@ class WorkspaceEditor(QWidget):
         self.workspace_components = grouped_records
 
         for category in sorted(grouped_records.keys()):
-            category_item = QTreeWidgetItem([category, ""])
+            category_item = QTreeWidgetItem([category])
             category_item.setData(
                 0, Qt.ItemDataRole.UserRole,
-                {"plugin_type": category, "component_key": None, "root": True}
+                {
+                    "plugin_type": category,
+                    "component_key": None,
+                    "root": True,
+                    "node_path": (category,),
+                }
             )
+            category_item.setBackground(0,
+                self.COMPONENT_COLORS.get("plugin_type", "#FFFFFF"))
             category_item.setFirstColumnSpanned(True)
             self.workspace_components_tree.addTopLevelItem(category_item)
             for record in sorted(grouped_records[category], key=lambda item: item.name):
-                self._add_part_record_item(category_item, record)
+                self._add_part_record_item(category, record, category_item)
             category_item.setExpanded(True)
 
     def _on_script_changed(self, current: QListWidgetItem | None, previous: QListWidgetItem | None) -> None:
@@ -440,6 +458,7 @@ class WorkspaceEditor(QWidget):
                     "script_slot": True,
                     "type_info": type_info,
                     "script_path": str(script_handle.path),
+                    "node_path": (key,),
                     "slot_name": str(key),
                 }
             )
@@ -454,10 +473,9 @@ class WorkspaceEditor(QWidget):
                     {
                         "id": str(record.id),
                         "existing_component": True,
-                        "descriptor_path": str(record.descriptor_path),
                         "folder": str(record.folder),
                         "option_count": len(records_by_component_key.get(str(key), [])),
-                        "node_path": (),
+                        "node_path": (key, record.id),
                         "record": record,
                     },
                 )
@@ -468,22 +486,26 @@ class WorkspaceEditor(QWidget):
         components_item.setExpanded(True)
 
 
-    def _add_part_record_item(self, parent: QTreeWidgetItem, record: ComponentRecord) -> None:
-        display_name = str(record.name)
-        item = QTreeWidgetItem([display_name, str(record.plugin_name)])
+    def _add_part_record_item(self,
+            category: str, record: ComponentRecord,
+            parent: QTreeWidgetItem) -> None:
+        display_name = f"{record.name} ({record.plugin_name})"
+        item = QTreeWidgetItem([display_name])
         item.setData(
             0,
             Qt.ItemDataRole.UserRole,
             {
-                "descriptor_path": str(record.descriptor_path),
                 "folder": str(record.folder),
-                "node_path": (display_name,),
+                "node_path": (category, record.id),
                 "record": record,
                 "id": str(record.id),
             },
         )
+
+        item.setBackground(0,
+            self.COMPONENT_COLORS.get("component_instance", "#FFFFFF"))
         parent.addChild(item)
-        self._populate_component_children(item, record, (display_name,))
+        self._populate_component_children(item, record, (category, record.id))
 
     def _populate_component_children(
         self,
@@ -500,7 +522,7 @@ class WorkspaceEditor(QWidget):
         specs = {}
         for key in subcomponent_spec:
             plugin_type = record.subcomponent_spec[key]
-            child_item = QTreeWidgetItem([str(key), plugin_type])
+            child_item = QTreeWidgetItem([f"{key} ({plugin_type})"])
             path = node_path + (key,)
             child_item.setData(
                 0,
@@ -515,6 +537,8 @@ class WorkspaceEditor(QWidget):
                 },
             )
             specs[key] = child_item
+            child_item.setBackground(0,
+                self.COMPONENT_COLORS.get("component_key", "#FFFFFF"))
             parent_item.addChild(child_item)
 
         for key, value in subcomponents.items():
@@ -522,6 +546,15 @@ class WorkspaceEditor(QWidget):
             assert spec_item is not None, f"Spec item for key '{key}' not found."
 
             subcomponent_record = self.workspace.get_subcomponent(record.id, key)
+            child_node_path = node_path + (key,)
+
+            if isinstance(subcomponent_record, LinkedComponentRecord):
+                instance_color = self.COMPONENT_COLORS.get("linked_component_ok", "#FFFFFF")
+                if not self.workspace.is_linked_component_valid(subcomponent_record):
+                    instance_color = self.COMPONENT_COLORS.get("linked_component_failed", "#FFFFFF")
+            else:
+                instance_color = self.COMPONENT_COLORS.get("component_instance", "#FFFFFF")
+
             if subcomponent_record is None:
                 continue
             elif isinstance(value, list):
@@ -533,15 +566,15 @@ class WorkspaceEditor(QWidget):
                         0,
                         Qt.ItemDataRole.UserRole,
                         {
-                            "descriptor_path": str(record.descriptor_path),
                             "folder": str(record.folder),
-                            "node_path": node_path + (key, idx),
+                            "node_path": child_node_path + (subcomponent_record[idx].id,),
                             "component_key": str(key),
                             "record": subcomponent_record[idx],
                             "subcomponent_spec": False,
                             "id": str(subcomponent_record[idx].id),
                         },
                     )
+                    child_item.setBackground(0, instance_color)
                     spec_item.addChild(child_item)
                     self._populate_component_children(child_item,
                             subcomponent_record[idx], node_path + (key, idx))
@@ -552,15 +585,15 @@ class WorkspaceEditor(QWidget):
                     0,
                     Qt.ItemDataRole.UserRole,
                     {
-                        "descriptor_path": str(record.descriptor_path),
                         "folder": str(record.folder),
-                        "node_path": node_path + (key,),
+                        "node_path": child_node_path + (subcomponent_record.id,),
                         "record": subcomponent_record,
                         "component_key": str(key),
                         "subcomponent_spec": False,
                         "id": str(subcomponent_record.id),
                     },
                 )
+                child_item.setBackground(0, instance_color)
                 spec_item.addChild(child_item)
                 record = self.workspace.get_subcomponent(record.id, key)
                 self._populate_component_children(child_item,
@@ -620,6 +653,7 @@ class WorkspaceEditor(QWidget):
             return
 
         self.current_part_id = record.id
+        self.current_part_node_path = payload.get("node_path", ())
         self.current_part_source = "workspace"
         self.current_part_saved_name = record.name
         self.part_title.setText(f"{self.current_part_saved_name} ({plugin_type})")
@@ -648,12 +682,15 @@ class WorkspaceEditor(QWidget):
             self._reset_part_views()
             return
 
+
+
         context = current.data(0, Qt.ItemDataRole.UserRole)
         if not isinstance(context, dict):
             self._reset_part_views()
             return
 
 
+        self.current_part_node_path = context.get("node_path", ())
         option_count = int(context.get("option_count", 0))
         self.add_component_button.setText("Add Option" if option_count > 0 else "Add Component")
         self.remove_component_button.setText("Remove Option" if option_count > 0 else "Remove Component")
@@ -684,7 +721,7 @@ class WorkspaceEditor(QWidget):
             self.part_save_name_button.setEnabled(True)
             return
 
-        if "descriptor_path" not in context or "folder" not in context:
+        if "folder" not in context:
             self._reset_part_views()
             return
 
@@ -749,7 +786,8 @@ class WorkspaceEditor(QWidget):
 
         self._on_workspace_component_changed(item, None)
 
-    def _on_script_part_tree_double_clicked(self, item: QTreeWidgetItem, column: int) -> None:
+    def _on_workspace_part_tree_double_clicked(self,
+            item: QTreeWidgetItem, column: int) -> None:
         del column
         context = item.data(0, Qt.ItemDataRole.UserRole)
         if not isinstance(context, dict):
@@ -759,10 +797,13 @@ class WorkspaceEditor(QWidget):
             return
 
         record : ComponentRecord | LinkedComponentRecord = context["record"]
-        plugin_name, plugin_type, library = self.resolve_info_from_component_record(record)
-        info = self.get_plugin_info(plugin_name, plugin_type, library)  # Ensure plugin type info is loaded
+        plugin_name, plugin_type, library = \
+            self.resolve_info_from_component_record(record)
+        # Ensure plugin type info is loaded
+        info = self.get_plugin_info(plugin_name, plugin_type, library)
 
-        file_path = self.lib_manager.get_plugin_path_absolute(info, record.library)
+        file_path = self.lib_manager.get_plugin_path_absolute(
+            info["PluginPath"], library)
 
         _open_in_system_editor(file_path)
 
@@ -770,33 +811,44 @@ class WorkspaceEditor(QWidget):
         item = self.script_part_tree.currentItem()
         while item is not None:
             context = item.data(0, Qt.ItemDataRole.UserRole)
-            if isinstance(context, dict) and context.get("script_slot") is True:
+            if isinstance(context, dict) \
+                    and context.get("script_slot") is True:
                 info = context.get("type_info", {})
-                return (context.get("slot_name", ""), info.get("PluginTypeName", ""))
+                return (context.get("slot_name", ""), \
+                        info.get("PluginTypeName", ""))
             item = item.parent()
         return "", ""
 
-    def _node_at_path(self, payload: object, node_path: tuple[object, ...]) -> object:
+    def _get_node_path_for_current_part(self) \
+            -> tuple[object, ...]:
+        return self.current_part_node_path
+
+    def _node_at_path(self,
+            payload: object, node_path: tuple[object, ...]) -> object:
         node = payload
         for step in node_path:
             if isinstance(node, dict) and isinstance(step, str):
                 node = node.get(step)
-            elif isinstance(node, list) and isinstance(step, int) and 0 <= step < len(node):
+            elif isinstance(node, list) and isinstance(step, int) \
+                    and 0 <= step < len(node):
                 node = node[step]
             else:
                 return {}
         return node
 
     def open_selected_part_parameters(self) -> None:
-        current_part_folder = self.workspace.get_component(self.current_part_id).folder
-        params_path = self.workspace.component_parameter_store.ensure_parameters_file(current_part_folder)
+        current_part_folder = self.workspace \
+            .get_component(self.current_part_id).folder
+        params_path = self.workspace.component_parameter_store\
+            .ensure_parameters_file(current_part_folder)
         try:
             _open_in_system_editor(params_path)
         except Exception as exc:
             QMessageBox.critical(self, "Open parameters failed", str(exc))
 
     def open_selected_part_context(self) -> None:
-        current_part_folder = self.workspace.get_component(self.current_part_id).folder
+        current_part_folder = self.workspace \
+            .get_component(self.current_part_id).folder
         if current_part_folder is None:
             return
         try:
@@ -811,14 +863,16 @@ class WorkspaceEditor(QWidget):
             return
 
         try:
-            record : ComponentRecord = self.workspace.read_part_descriptor(current_part_folder)
+            record : ComponentRecord = \
+                self.workspace.read_part_descriptor(current_part_folder)
         except FileNotFoundError as exc:
             QMessageBox.critical(self, "Save failed", str(exc))
             return
 
         new_name = self.part_name_editor.text().strip()
         if not new_name:
-            QMessageBox.information(self, "Save description", "Name cannot be empty.")
+            QMessageBox.information(self,
+                "Save description", "Name cannot be empty.")
             return
 
         # Create a new record with the updated name
@@ -830,18 +884,19 @@ class WorkspaceEditor(QWidget):
             library=record.library,
             subcomponent_spec=record.subcomponent_spec,
             folder=record.folder,
-            descriptor_path=record.descriptor_path,
         )
-        self.workspace.write_part_descriptor(updated_record.folder, updated_record)
+        self.workspace.write_part_descriptor(
+            updated_record.folder, updated_record)
         self.current_part_saved_name = new_name
         self.log_message(f"Saved description.json for {new_name}")
-        changed = self._update_active_component_name(new_name, self.current_part_source, dirty=False)
+        changed = self._update_active_component_name(
+            new_name, self.current_part_source, dirty=False)
         if changed:
             self._refresh_part_title(new_name, is_dirty=False)
 
+        path = self._get_node_path_for_current_part()
         self._refresh_current_script_parts()
-        descriptor_path = self.workspace.part_descriptor_path(current_part_folder)
-        self._reselect_script_part_node(descriptor_path, ())
+        self._reselect_workspace_part_node(path)
 
 
     def _search_tree_for_part_id_recursive(self,
@@ -860,7 +915,8 @@ class WorkspaceEditor(QWidget):
         return None
 
     def _update_active_component_name(self,
-            new_name: str, current_part_source: str | None, *, dirty: bool) -> None:
+            new_name: str,
+            current_part_source: str | None, *, dirty: bool) -> None:
 
         def update_item_label(item: QTreeWidgetItem) -> bool:
             if item is None:
@@ -875,21 +931,25 @@ class WorkspaceEditor(QWidget):
             return False
 
         def get_item_from_part_tree(part_id):
-            return self._search_tree_for_part_id_recursive(self.script_part_tree, part_id)
+            return self._search_tree_for_part_id_recursive(
+                self.script_part_tree, part_id)
 
         def get_item_from_workspace_tree(part_id):
-            return self._search_tree_for_part_id_recursive(self.workspace_components_tree, part_id)
+            return self._search_tree_for_part_id_recursive(
+                self.workspace_components_tree, part_id)
 
 
         if current_part_source == "script":
             current_tree_item = self.script_part_tree.currentItem()
-            if current_tree_item is not None and not self._allows_name_editing(current_tree_item):
+            if current_tree_item is not None \
+                    and not self._allows_name_editing(current_tree_item):
                 return False
             # find by component id
             current_workspace_item = get_item_from_workspace_tree(self.current_part_id)
         elif current_part_source == "workspace":
             current_workspace_item = self.workspace_components_tree.currentItem()
-            if current_workspace_item is not None and not self._allows_name_editing(current_workspace_item):
+            if current_workspace_item is not None \
+                    and not self._allows_name_editing(current_workspace_item):
                 return False
             # find by component id
             current_tree_item = get_item_from_part_tree(self.current_part_id)
@@ -926,11 +986,12 @@ class WorkspaceEditor(QWidget):
         if changed:
             self._refresh_part_title(stripped_name, is_dirty)
 
-    def _reselect_script_part_node(self, descriptor_path: Path, node_path: tuple[object, ...]) -> None:
+    def _reselect_workspace_part_node(self,
+            node_path: tuple[object, ...]) -> None:
         def matches(item: QTreeWidgetItem) -> bool:
             context = item.data(0, Qt.ItemDataRole.UserRole)
-            return isinstance(context, dict) and Path(str(context.get("descriptor_path", ""))) \
-                == descriptor_path and tuple(context.get("node_path", ())) == node_path
+            return isinstance(context, dict) and \
+                context.get("node_path", ()) == node_path
 
         def walk(item: QTreeWidgetItem) -> QTreeWidgetItem | None:
             if matches(item):
@@ -941,11 +1002,14 @@ class WorkspaceEditor(QWidget):
                     return result
             return None
 
-        for index in range(self.script_part_tree.topLevelItemCount()):
-            item = walk(self.script_part_tree.topLevelItem(index))
+        for index in range(self.workspace_components_tree.topLevelItemCount()):
+            item = walk(self.workspace_components_tree.topLevelItem(index))
             if item is not None:
-                self.script_part_tree.setCurrentItem(item)
-                return
+                self.workspace_components_tree.setCurrentItem(item)
+                item.setExpanded(True)
+                self.workspace_components_tree.itemClicked.emit(item, 0)
+                self.current_part_node_path = node_path
+                break
 
     def _reset_part_views(self, clear_tree: bool = False) -> None:
         self.current_part_id = None
@@ -972,22 +1036,29 @@ class WorkspaceEditor(QWidget):
 
     def debug_selected_script(self) -> None:
         if self.current_script_handle is None:
-            QMessageBox.information(self, "Script", "Select a script first.")
+            QMessageBox.information(self,
+                "Script", "Select a script first.")
             return
 
         workspace_root = self.workspace.root
-        result = self.vscode_debug_config_service.ensure_for_script(self.current_script_handle.path, workspace_root)
+        result = self.vscode_debug_config_service \
+            .ensure_for_script(self.current_script_handle.path, workspace_root)
         if result.message:
             self.log_message(result.message)
         if result.status == "invalid":
-            QMessageBox.critical(self, "Script", result.message or "Invalid VS Code debug configuration.")
+            QMessageBox.critical(self,
+                "Script", result.message \
+                    or "Invalid VS Code debug configuration.")
             return
 
-        launch_result = self.vscode_debug_config_service.launch_debug_for_script(self.current_script_handle.path, workspace_root)
+        launch_result = self.vscode_debug_config_service \
+            .launch_debug_for_script(self.current_script_handle.path, workspace_root)
         if launch_result.message:
             self.log_message(launch_result.message)
         if launch_result.status != "ok":
-            QMessageBox.critical(self, "Script", launch_result.message or "Failed to start VS Code debug session.")
+            QMessageBox.critical(self,
+                "Script", launch_result.message \
+                    or "Failed to start VS Code debug session.")
 
     def open_add_component_dialog(self) -> None:
 
@@ -1002,7 +1073,8 @@ class WorkspaceEditor(QWidget):
             component_key = None
         elif current_item is not None:
             payload = current_item.data(0, Qt.ItemDataRole.UserRole)
-            if "subcomponent_spec" in payload and payload["subcomponent_spec"] is True:
+            if "subcomponent_spec" in payload \
+                    and payload["subcomponent_spec"] is True:
                 plugin_type = payload.get("plugin_type", "")
                 component_key = payload.get("component_key", None)
                 assign_subcomponent = True
@@ -1023,32 +1095,42 @@ class WorkspaceEditor(QWidget):
             self.log_message("No valid selection for Add Component.")
             return
 
-        dialog = create_assign_or_create_component_dialog(self, self.workspace_components,
+        dialog = create_assign_or_create_component_dialog(
+                self, self.workspace_components,
                 self.available_plugins, plugin_type=plugin_type,
                 offer_assign=offer_assign)
         if dialog is None or not dialog.has_plugins:
-            self.log_message("No compatible plugins found for Add Component.")
-            QMessageBox.information(self, "Add Component", "No compatible plugins found.")
+            self.log_message(
+                "No compatible plugins found for Add Component.")
+            QMessageBox.information(self,
+                "Add Component", "No compatible plugins found.")
             return
 
         if dialog.exec() == QDialog.DialogCode.Accepted:
             selected_item_type, plugin = dialog.get_selected_item()
             if assign_subcomponent is False:
                 if selected_item_type == "component" and plugin is not None:
-                    self._assign_component_to_script(plugin, log_info=True, refresh_workspace=False)
+                    self._assign_component_to_script(
+                        plugin, log_info=True, refresh_workspace=False)
                 elif selected_item_type == "plugin" and plugin is not None:
-                    self._create_selected_component(plugin, component_key)
+                    self._create_selected_component(
+                        plugin, component_key)
                 else:
-                    self.log_message("No component or plugin selected for Add Component.")
-                    QMessageBox.information(self, "Add Component", "No component or plugin selected.")
+                    self.log_message(
+                        "No component or plugin selected for Add Component.")
+                    QMessageBox.information(self,
+                        "Add Component", "No component or plugin selected.")
             else:
                 if selected_item_type == "component" and plugin is not None:
                     self._assign_subcomponent(plugin, log_info=True)
                 elif selected_item_type == "plugin" and plugin is not None:
-                    self._create_selected_component(plugin, component_key, parent_component_id)
+                    self._create_selected_component(
+                        plugin, component_key, parent_component_id)
                 else:
-                    self.log_message("No component or plugin selected for Add Subcomponent.")
-                    QMessageBox.information(self, "Add Subcomponent", "No component or plugin selected.")
+                    self.log_message(
+                        "No component or plugin selected for Add Subcomponent.")
+                    QMessageBox.information(
+                        self, "Add Subcomponent", "No component or plugin selected.")
 
     def log_message(self, message: str) -> None:
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1063,12 +1145,11 @@ class WorkspaceEditor(QWidget):
         self.workspace.assign_component_to_script(
             self.current_script_handle, component_key, record.id)
         if log_info:
-            self.log_message(f"Assigned component {record.name} to script slot {component_key}")
+            self.log_message(
+                f"Assigned component {record.name} to script slot {component_key}")
         if refresh_workspace:
             self._refresh_workspace_components_tree()
         self._refresh_current_script_parts()
-        self._reselect_script_part_node(
-            self.workspace.part_descriptor_path(record.folder), ())
 
 
     def _assign_subcomponent(self, plugin_info: ComponentRecord,
@@ -1095,7 +1176,9 @@ class WorkspaceEditor(QWidget):
         if log_info:
             self.log_message(f"Assigned subcomponent {child_record.name}"
                 f" to parent component {parent_record.name} at slot {component_key}")
+        path = self._get_node_path_for_current_part()
         self._refresh_workspace_components_tree()
+        self._reselect_workspace_part_node(path + (child_record.id,))
 
 
     def _create_selected_component(self,
@@ -1140,8 +1223,9 @@ class WorkspaceEditor(QWidget):
 
         self.log_message(f"Created component {component_name} at {record.folder}")
         self._refresh_current_script_parts()
+        path = self._get_node_path_for_current_part()
         self._refresh_workspace_components_tree()
-        self._reselect_script_part_node(self.workspace.part_descriptor_path(record.folder), ())
+        self._reselect_workspace_part_node(path + (record.id,))
 
     def remove_selected_component(self) -> None:
 
@@ -1149,30 +1233,40 @@ class WorkspaceEditor(QWidget):
         if current_part_folder is None:
             return
 
-        if QMessageBox.question(self, "Remove Component", "Remove selected component?") != QMessageBox.StandardButton.Yes:
+        if QMessageBox.question(
+            self, "Remove Component",
+            "Remove selected component?") != QMessageBox.StandardButton.Yes:
             return
 
         try:
-            if self.current_part_source == "script" and self.current_script_handle is not None:
+            if self.current_part_source == "script" \
+                    and self.current_script_handle is not None:
                 component_key, _ = self._selected_script_component_kv()
-                self.workspace.remove_component_from_script(self.current_script_handle, self.current_part_id, component_key)
+                self.workspace.remove_component_from_script(
+                    self.current_script_handle, self.current_part_id, component_key)
             elif self.current_part_source == "workspace":
                 self.workspace.remove_component(self.current_part_id)
             else:
-                QMessageBox.warning(self, "Remove Component", "Cannot determine the source of the selected component.")
+                QMessageBox.warning(self,
+                    "Remove Component",
+                    "Cannot determine the source of the selected component.")
                 return
             self.log_message(f"Removed component at {current_part_folder}")
         except Exception as exc:
-            QMessageBox.critical(self, "Remove Component", f"Failed to remove component: {exc}")
+            QMessageBox.critical(self,
+                "Remove Component", f"Failed to remove component: {exc}")
             return
 
         self._refresh_current_script_parts()
-        self._refresh_workspace_components_tree()
         self._reset_part_views()
+        path = self._get_node_path_for_current_part()
+        self._refresh_workspace_components_tree()
+        self._reselect_workspace_part_node(path[:-1])
 
 
     def duplicate_selected_component(self) -> None:
-        current_part_folder = self.workspace.get_component(self.current_part_id).folder
+        current_part_folder = self.workspace.get_component(
+            self.current_part_id).folder
         if current_part_folder is None:
             return
 
@@ -1180,15 +1274,20 @@ class WorkspaceEditor(QWidget):
             if self.current_part_source == "script":
                 return
             if self.current_part_source == "workspace":
-                duplicated_record = self.workspace.duplicate_component(self.current_part_id)
-                self.log_message(f"Duplicated component to {duplicated_record.folder}")
+                duplicated_record = \
+                    self.workspace.duplicate_component(self.current_part_id)
+                self.log_message(
+                    f"Duplicated component to {duplicated_record.folder}")
         except Exception as exc:
-            QMessageBox.critical(self, "Duplicate Component", f"Failed to duplicate component: {exc}")
+            QMessageBox.critical(self,
+                "Duplicate Component", f"Failed to duplicate component: {exc}")
             return
 
         self._refresh_current_script_parts()
+        path = self._get_node_path_for_current_part()
+        duplicated_path = path[:-1] + (duplicated_record.id,)
         self._refresh_workspace_components_tree()
-        self._reselect_script_part_node(self.workspace.part_descriptor_path(duplicated_record.folder), ())
+        self._reselect_workspace_part_node(duplicated_path)
 
     def _refresh_current_script_parts(self) -> None:
         if self.current_script_handle is not None:
@@ -1219,13 +1318,15 @@ class WorkspaceEditor(QWidget):
             return
         script_name = dialog.name
         script_path = Path(dialog.path) / script_name
-        script_handle = self.workspace.create_script(script_path, default_script_source(script_path))
+        script_handle = self.workspace.create_script(
+            script_path, default_script_source(script_path))
         self.refresh_scripts()
         self._select_script_path(script_handle)
         self.open_selected_script(self.script_list.currentItem())
 
     def load_script(self) -> None:
-        script_path, _ = QFileDialog.getOpenFileName(self, "Load Script", str(self.workspace.root), "All Files (*)")
+        script_path, _ = QFileDialog.getOpenFileName(
+            self, "Load Script", str(self.workspace.root), "All Files (*)")
         if not script_path:
             return
         script_handle = self.workspace.load_script(Path(script_path))
@@ -1240,7 +1341,9 @@ class WorkspaceEditor(QWidget):
         if item is None:
             return
         script_path = Path(item.data(Qt.ItemDataRole.UserRole))
-        if QMessageBox.question(self, "Delete script", f"Delete {script_path.name}?") != QMessageBox.StandardButton.Yes:
+        if QMessageBox.question(self,
+            "Delete script", f"Delete {script_path.name}?") \
+                != QMessageBox.StandardButton.Yes:
             return
         self.workspace.delete_script(script_path)
         self.refresh_scripts()
@@ -1262,10 +1365,13 @@ class WorkspaceEditor(QWidget):
                 return
 
 
-    def get_plugin_type_info(self, plugin_name: str) -> dict[str, Any] | None:
+    def get_plugin_type_info(self, plugin_name: str) \
+        -> dict[str, Any] | None:
         return self.plugin_types.get(plugin_name)
 
-    def get_plugin_info(self, plugin_name: str, plugin_type: str, library: str | None) -> dict[str, Any] | None:
+    def get_plugin_info(self,
+            plugin_name: str, plugin_type: str,
+            library: str | None) -> dict[str, Any] | None:
         lib_plugins = self.available_plugins.get(library)
         if lib_plugins is None:
             return None

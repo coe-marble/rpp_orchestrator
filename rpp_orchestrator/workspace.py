@@ -2,11 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+import shutil
 from typing import Any, Generator
-from uuid import uuid4
-
-from .component_storage import ComponentDataStore, ComponentParameterStore, ComponentRecord, LinkedComponentRecord
 from rpp_plugin_registrator.library_manager import LibraryManager
+
+from .component_storage import (
+    ComponentDataStore,
+    ComponentParameterStore,
+    ComponentRecord,
+    LinkedComponentRecord
+)
 from .script_handle import (
     ScriptHandle,
     get_script_language_from_path,
@@ -45,11 +50,27 @@ class Workspace:
 
     def __init__(self, root: Path, lib_manager: LibraryManager | None = None) -> None:
         self.root = root.expanduser().resolve()
-        self.rppws_folder = self.root / ".rppws"
         self.lib_manager = lib_manager or LibraryManager()
         self.component_data_store = ComponentDataStore(self.parts_path, lib_manager=self.lib_manager)
         self.part_records: dict[str, ComponentRecord] = {}
         self._load_part_records()
+
+
+    @classmethod
+    def workspace_exists(cls, root: Path) -> bool:
+        rppws_folder = root / ".rppws"
+        return rppws_folder.exists() and rppws_folder.is_dir()
+
+    @classmethod
+    def clear(cls) -> None:
+        # Clear the workspace by removing the .rppws folder
+        rppws_folder = Path(".rppws")
+        if rppws_folder.exists() and rppws_folder.is_dir():
+            shutil.rmtree(rppws_folder)
+
+    @property
+    def rppws_folder(self) -> Path:
+        return self.root / ".rppws"
 
     @property
     def component_parameter_store(self) -> ComponentParameterStore:
@@ -183,6 +204,17 @@ class Workspace:
         if script_path.exists():
             script_path.unlink()
 
+
+    def is_linked_component_valid(self, linked_record: LinkedComponentRecord) -> bool:
+        #TODO: Implement support for cross-workspace linked components in the future.
+        try:
+            linked_component = self.get_part_record_by_id(linked_record.linked_component_id)
+            if not linked_component:
+                return False
+            return True
+        except ValueError:
+            return False
+
     def create_component(
         self,
         component_name: str,
@@ -274,7 +306,7 @@ class Workspace:
 
         parent_record, new_child = \
             self.component_data_store.create_linked_subcomponent_folder(
-                parent_record, slot_name, child_record,
+                parent_record, slot_name, child_record, self.name,
                 overwrite=overwrite, allow_list=allow_list
             )
         self.part_records[new_child.id] = new_child
@@ -577,23 +609,27 @@ class Workspace:
             component_record = self.component_data_store.load_description(record_path.parent)
             self.part_records[component_record.id] = component_record
 
-def open_workspace(ws_path: str | Path) -> Workspace:
+def open_workspace(ws_path: str | Path, lib_manager: LibraryManager | None = None) -> Workspace:
     root_path = Path(ws_path).expanduser().resolve()
     if not root_path.exists() or not root_path.is_dir():
         raise FileNotFoundError(
             f"Workspace root does not exist or is not a directory: {root_path}")
-    workspace = Workspace(root=root_path)
+    workspace = Workspace(root=root_path, lib_manager=lib_manager)
     return workspace
 
-def create_workspace(root: str | Path, name: str | None = None, overwrite: bool = False) -> Workspace:
+def create_workspace(root: str | Path,
+        name: str | None = None, overwrite: bool = False,
+        lib_manager: LibraryManager | None = None) -> Workspace:
     root_path = Path(root).expanduser().resolve()
-    if root_path.exists() and any(root_path.iterdir()) and not overwrite:
+    exists = Workspace.workspace_exists(root_path)
+    if exists and not overwrite:
         raise FileExistsError(
             f"Workspace root already exists and is not empty: {root_path}"
         )
-
+    if exists:
+        Workspace.clear()
     root_path.mkdir(parents=True, exist_ok=True)
-    workspace = Workspace(root=root_path)
+    workspace = Workspace(root=root_path, lib_manager=lib_manager)
     workspace.ensure_layout()
     default_script_name = name or f"new_{workspace.name}_script"
     extension = language_spec(workspace.default_script_language).extension

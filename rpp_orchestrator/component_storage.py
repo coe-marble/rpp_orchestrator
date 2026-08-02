@@ -84,6 +84,7 @@ class LinkedComponentRecord:
     name: str
     folder: Path
     linked_component_id: str
+    linked_component_workspace: str
     parent_component_info: ParentComponentInfo
 
     def to_dict(self) -> dict[str, object]:
@@ -91,6 +92,7 @@ class LinkedComponentRecord:
             "Id": self.id,
             "Name": self.name,
             "LinkedComponentId": self.linked_component_id,
+            "LinkedComponentWorkspace": self.linked_component_workspace,
             "ParentComponentInfo": self.parent_component_info.to_dict(),
         }
 
@@ -104,6 +106,7 @@ class LinkedComponentRecord:
             name=str(data["Name"]),
             folder=folder,
             linked_component_id=str(data["LinkedComponentId"]),
+            linked_component_workspace=str(data["LinkedComponentWorkspace"]),
             parent_component_info=ParentComponentInfo.from_dict(data["ParentComponentInfo"]),
         )
 
@@ -125,9 +128,11 @@ class ComponentRecord:
         if self.subcomponents is not None:
             for key, sub in self.subcomponents.items():
                 if isinstance(sub, list):
-                    parsed_subcomponents = {key: [s.to_dict() for s in sub] for key, sub in self.subcomponents.items()}
+                    parsed_subcomponents = {key: [s.to_dict() for s in sub] \
+                        for key, sub in self.subcomponents.items()}
                 else:
-                    parsed_subcomponents = {key: sub.to_dict() for key, sub in self.subcomponents.items()}
+                    parsed_subcomponents = {key: sub.to_dict() \
+                        for key, sub in self.subcomponents.items()}
         return {
             "Id": self.id,
             "Name": self.name,
@@ -136,7 +141,8 @@ class ComponentRecord:
             "Library": self.library,
             "SubcomponentSpec": self.subcomponent_spec,
             "Subcomponents": parsed_subcomponents,
-            "ParentComponentInfo": dict(self.parent_component_info.to_dict()) if self.parent_component_info else None,
+            "ParentComponentInfo": dict(self.parent_component_info.to_dict()) \
+                if self.parent_component_info else None,
         }
 
     @classmethod
@@ -150,9 +156,11 @@ class ComponentRecord:
         if data.get("Subcomponents") is not None:
             for key, sub in data["Subcomponents"].items():
                 if isinstance(sub, list):
-                    parsed_subcomponents[key] = [SubcomponentInfo.from_dict(s) for s in sub]
+                    parsed_subcomponents[key] = \
+                        [SubcomponentInfo.from_dict(s) for s in sub]
                 else:
-                    parsed_subcomponents[key] = SubcomponentInfo.from_dict(sub)
+                    parsed_subcomponents[key] = \
+                        SubcomponentInfo.from_dict(sub)
 
         return cls(
             id=str(data["Id"]),
@@ -163,7 +171,9 @@ class ComponentRecord:
             folder=folder,
             subcomponent_spec=data.get("SubcomponentSpec"),
             subcomponents=parsed_subcomponents,
-            parent_component_info=ParentComponentInfo.from_dict(data["ParentComponentInfo"]) if data.get("ParentComponentInfo") else None,
+            parent_component_info=
+                ParentComponentInfo.from_dict(data["ParentComponentInfo"]) \
+                    if data.get("ParentComponentInfo") else None,
         )
 
 class ComponentParameterStore:
@@ -202,7 +212,8 @@ class ComponentParameterStore:
         params_path = self.parameters_path(component_folder)
         params_path.parent.mkdir(parents=True, exist_ok=True)
         normalized = _normalize_parameters_payload(payload)
-        params_path.write_text(_build_component_parameters_source(normalized), encoding="utf-8")
+        params_path.write_text(
+            _build_component_parameters_source(normalized), encoding="utf-8")
         return params_path
 
 
@@ -210,16 +221,19 @@ class ComponentParameterStore:
             component_folder: Path, payload: dict[str, Any] | None = None) -> Path:
         params_path = self.parameters_path(component_folder)
         params_path.parent.mkdir(parents=True, exist_ok=True)
-        params_path.write_text(_build_component_parameters_source(payload or {}), encoding="utf-8")
+        params_path.write_text(
+            _build_component_parameters_source(payload or {}), encoding="utf-8")
         return params_path
 
-    def clone_parameters_file(self, source_component_folder: Path, target_component_folder: Path) -> Path:
+    def clone_parameters_file(self,
+            source_component_folder: Path, target_component_folder: Path) -> Path:
         source_params_path = self.parameters_path(source_component_folder)
         target_params_path = self.parameters_path(target_component_folder)
         target_params_path.parent.mkdir(parents=True, exist_ok=True)
 
         if source_params_path.exists():
-            target_params_path.write_text(source_params_path.read_text(encoding="utf-8"), encoding="utf-8")
+            target_params_path.write_text(
+                source_params_path.read_text(encoding="utf-8"), encoding="utf-8")
             return target_params_path
 
         return self.ensure_parameters_file(target_component_folder)
@@ -269,19 +283,23 @@ def _python_literal(value: Any) -> str:
             return f"({_python_literal(value[0])},)"
         return "(" + ", ".join(_python_literal(item) for item in value) + ")"
     if isinstance(value, dict):
-        items = ", ".join(f"{_python_literal(str(key))}: {_python_literal(item)}" for key, item in value.items())
+        items = ", ".join(
+            f"{_python_literal(str(key))}: {_python_literal(item)}" \
+                for key, item in value.items())
         return "{" + items + "}"
     return repr(str(value))
 
 
 def _build_component_parameters_source(payload: dict[str, Any]) -> str:
-    lines = ["from __future__ import annotations", "", "", "class ComponentParameters:"]
+    lines = ["from __future__ import annotations",
+        "", "", "class ComponentParameters:"]
 
     for name, value in payload.items():
         if "default_value" not in value:
             lines.append(f"    {name} = None")
             continue
-        lines.append(f"    {name} = {_python_literal(value['default_value'])}")
+        lines.append(
+            f"    {name} = {_python_literal(value['default_value'])}")
     if len(payload) == 0:
         lines.append("    pass")
 
@@ -312,19 +330,25 @@ def _parameter_default_value(entry: Any) -> Any:
 
 def _normalize_parameters_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if isinstance(payload, dict):
-        return {str(key): _python_safe_value(value) for key, value in payload.items()}
+        return {
+            str(key): _python_safe_value(value) \
+                for key, value in payload.items()
+        }
 
     normalized: dict[str, Any] = {}
     for entry in payload:
         name = _parameter_name(entry)
         if name is None:
             continue
-        normalized[name] = _python_safe_value(_parameter_default_value(entry))
+        normalized[name] = \
+        _python_safe_value(_parameter_default_value(entry))
     return normalized
 
 
 class ComponentDataStore:
-    def __init__(self, parts_root: Path, layout: ComponentLayout | None = None, lib_manager: LibraryManager | None = None):
+    def __init__(self, parts_root: Path,
+            layout: ComponentLayout | None = None,
+            lib_manager: LibraryManager | None = None):
         self.parts_root = Path(parts_root)
         self.layout = layout or default_component_layout()
         self.parameters = ComponentParameterStore(self.layout, lib_manager)
@@ -353,20 +377,24 @@ class ComponentDataStore:
         payload = record.to_dict()
         description_path = self.description_path(component_folder)
         description_path.parent.mkdir(parents=True, exist_ok=True)
-        description_path.write_text(json.dumps(payload, indent=4, sort_keys=False), encoding="utf-8")
+        description_path.write_text(
+            json.dumps(payload, indent=4, sort_keys=False), encoding="utf-8")
         return description_path
 
-    def _with_parent_component_id(self, component_folder: Path, payload: dict[str, Any]) -> dict[str, Any]:
+    def _with_parent_component_id(self,
+            component_folder: Path, payload: dict[str, Any]) -> dict[str, Any]:
         normalized = dict(payload)
         parent_component_id = self._infer_parent_component_id(component_folder)
         if parent_component_id is not None:
             normalized.setdefault("ParentComponentId", parent_component_id)
         return normalized
 
-    def _infer_parent_component_id(self, component_folder: Path) -> str | None:
+    def _infer_parent_component_id(self,
+            component_folder: Path) -> str | None:
         parts = component_folder.parts
         try:
-            subcomponents_index = parts.index(self.layout.subcomponents_dir)
+            subcomponents_index = \
+                parts.index(self.layout.subcomponents_dir)
         except ValueError:
             return None
 
@@ -384,17 +412,20 @@ class ComponentDataStore:
         return self._load_record(description_path, with_fields=with_fields)
 
     def ensure_component_folder(self,
-            component_folder: Path, parameters: dict[str, Any] | list[Any] | None = None) -> None:
+            component_folder: Path,
+            parameters: dict[str, Any] | list[Any] | None = None) -> None:
         component_folder.mkdir(parents=True, exist_ok=True)
         self.data_path(component_folder).mkdir(parents=True, exist_ok=True)
         self.subcomponents_path(component_folder).mkdir(parents=True, exist_ok=True)
         self.parameters.ensure_parameters_file(component_folder, parameters)
         callbacks_path = self.callbacks_path(component_folder)
         if not callbacks_path.exists():
-            callbacks_path.write_text("from __future__ import annotations\n", encoding="utf-8")
+            callbacks_path.write_text(
+                "from __future__ import annotations\n", encoding="utf-8")
 
     def create_component_folder(
-        self, component_name: str, plugin_info_or_name : dict[str, Any] | str,
+        self, component_name: str,
+        plugin_info_or_name : dict[str, Any] | str,
         *,
         overwrite: bool = False,
     ) -> ComponentRecord:
@@ -436,6 +467,7 @@ class ComponentDataStore:
         parent_record: ComponentRecord,
         slot_name: str,
         link_record: ComponentRecord,
+        workspace_name: str,
         *,
         overwrite: bool = False,
         allow_list: bool = False
@@ -447,6 +479,7 @@ class ComponentDataStore:
             id = new_id,
             name = link_record.name,
             linked_component_id = link_record.id,
+            linked_component_workspace = str(workspace_name),
             folder = folder,
             parent_component_info = ParentComponentInfo(
                 id=parent_record.id,
@@ -501,7 +534,7 @@ class ComponentDataStore:
         plugin_type = plugin_info["PluginType"]
         subcomponent_spec = plugin_info["PluginMetadata"].get("Components", {})
         record_id = str(uuid4())
-        lib_name, plugin_name_in_lib = self.lm.parse_plugin_name(plugin_name)
+        lib_name, _ = self.lm.parse_plugin_name(plugin_name)
         folder = self.subcomponents_path(parent_component_folder) / record_id
         if folder.exists() and not overwrite:
             raise FileExistsError(f"Component folder already exists: {folder}")
@@ -607,6 +640,8 @@ class ComponentDataStore:
         if not component_folder.exists():
             return
         shutil.rmtree(component_folder)
+        if component_folder.parent.exists() and not any(component_folder.parent.iterdir()):
+            component_folder.parent.rmdir()
 
     def rename_component_folder(self, component_folder: Path, new_name: str) -> None:
         if not component_folder.exists():
@@ -617,13 +652,14 @@ class ComponentDataStore:
         self.save_description(component_folder, record)
         return record
 
-    def change_component_plugin_name(self, component_folder: Path, new_plugin_name: str) -> None:
+    def change_component_plugin_name(self,
+            component_folder: Path, new_plugin_name: str) -> None:
         if not component_folder.exists():
-            raise FileNotFoundError(f"Component folder does not exist: {component_folder}")
+            raise FileNotFoundError(
+                f"Component folder does not exist: {component_folder}")
         description_path = self.description_path(component_folder)
         record : ComponentRecord = self._load_record(description_path)
-        record.plugin_name = new_plugin_name
-        lib_name, plugin_name_in_lib = self.lm.parse_plugin_name(new_plugin_name)
+        lib_name, _ = self.lm.parse_plugin_name(new_plugin_name)
         record.library = lib_name
         record.plugin_name = new_plugin_name
         # now, move the component folder to the new location based on the new plugin name
@@ -637,7 +673,8 @@ class ComponentDataStore:
         self.save_description(new_folder, record)
         return record
 
-    def remove_subcomponent_folder(self, subcomponent_folder: Path) -> None:
+    def remove_subcomponent_folder(self,
+            subcomponent_folder: Path) -> None:
         self.remove_component_folder(subcomponent_folder)
 
     def _load_record(self,
@@ -650,14 +687,16 @@ class ComponentDataStore:
             return LinkedComponentRecord.from_dict(data, description_path)
         return ComponentRecord.from_dict(data, description_path)
 
-    def _copy_component_folder(self, source_folder: Path, target_folder: Path) -> None:
+    def _copy_component_folder(self,
+            source_folder: Path, target_folder: Path) -> None:
         shutil.copytree(source_folder, target_folder)
 
 
     def _setup_duplicated_components_recursive(self, target_folder: Path,
-                target_id: str, target_name: str | None,
-                parent_component_id: str | None = None,
-                new_component_records: dict[str, ComponentRecord] | None = None) -> None:
+            target_id: str, target_name: str | None,
+            parent_component_id: str | None = None,
+            new_component_records: dict[str, ComponentRecord] | None = None) \
+                -> None:
 
         fields = {"Id": target_id}
         if target_name:
@@ -666,7 +705,9 @@ class ComponentDataStore:
 
         if parent_component_id is not None:
             if record.parent_component_info is None:
-                assert False, "Parent component info should not be None when duplicating a subcomponent."
+                assert False, \
+                    "Parent component info should not be None " \
+                    + "when duplicating a subcomponent."
 
         if parent_component_id is not None:
             record.parent_component_info = \
@@ -681,7 +722,8 @@ class ComponentDataStore:
 
 
         def handle_child_subcomponent(sub: SubcomponentInfo,
-                target_folder: Path, new_component_records: dict[str, ComponentRecord]) -> None:
+                target_folder: Path,
+                new_component_records: dict[str, ComponentRecord]) -> None:
             old_id = sub.id
             sub_folder = self.subcomponents_path(target_folder) / old_id
             new_target_id = str(uuid4())
@@ -697,10 +739,12 @@ class ComponentDataStore:
                 if isinstance(sub_info, list):
                     new_sub_info = []
                     for sub in sub_info:
-                        new_sub_info_v = handle_child_subcomponent(sub, target_folder, new_component_records)
+                        new_sub_info_v = handle_child_subcomponent(
+                            sub, target_folder, new_component_records)
                         new_sub_info.append(new_sub_info_v)
                 else:
-                    new_sub_info = handle_child_subcomponent(sub_info, target_folder, new_component_records)
+                    new_sub_info = handle_child_subcomponent(
+                        sub_info, target_folder, new_component_records)
                 record.subcomponents[slot_name] = new_sub_info
 
         new_component_records[record.id] = record
