@@ -123,8 +123,6 @@ class Workspace:
         else:
             return self.get_component(subcomponent_info.id)
 
-
-
     def write_script(self, script_path: Path, source: str) -> Path:
         script_path.write_text(source, encoding="utf-8")
         return script_path
@@ -140,6 +138,14 @@ class Workspace:
     def ensure_parts_layout(self) -> None:
         self.parts_path.mkdir(parents=True, exist_ok=True)
 
+    def resolve_linked_folder(self,
+            record_id: str) -> Path | None:
+        record = self.get_component(record_id)
+        if isinstance(record, ComponentRecord):
+            return record.folder
+        linked_record = self.get_component(record.linked_component_id)
+        return linked_record.folder
+
     def list_scripts(self) -> list[ScriptHandle]:
         scripts = []
         script_descriptions_path = self.script_descriptions_path
@@ -154,12 +160,10 @@ class Workspace:
                 scripts.append(ScriptHandle(path=Path(script_path), ws=self, language=language))
         return scripts
 
-
     def ensure_script_assignments(self, script_path: Path) -> None:
         assignments_path = self.get_script_description_path(script_path)
         if not assignments_path.exists():
             self.write_script_description(script_path, DEFAULT_SCRIPT_LANGUAGE, {})
-
 
     def load_script(self, script_path: Path) -> ScriptHandle:
         if not script_path.exists():

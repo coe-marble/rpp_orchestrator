@@ -220,6 +220,8 @@ class ComponentParameterStore:
     def ensure_parameters_file(self,
             component_folder: Path, payload: dict[str, Any] | None = None) -> Path:
         params_path = self.parameters_path(component_folder)
+        if params_path.exists():
+            return params_path
         params_path.parent.mkdir(parents=True, exist_ok=True)
         params_path.write_text(
             _build_component_parameters_source(payload or {}), encoding="utf-8")
@@ -259,34 +261,35 @@ def _python_safe_value(value: Any) -> Any:
     return str(value)
 
 
-def _python_literal(value: Any) -> str:
+def _python_as_string(value: dict[str, Any] | None, indent = "") -> str:
     if value is None:
         return "None"
-    if isinstance(value, bool):
-        return "True" if value else "False"
-    if isinstance(value, int):
-        return str(value)
-    if isinstance(value, float):
+    value_type = value["type"]
+    if value_type == "bool":
+        return "True" if value["default_value"] else "False"
+    if value_type == "int":
+        return f"{value['default_value']}"
+    if value_type == "float":
+        value = value["default_value"]
         if value == float("inf"):
             return 'float("inf")'
         if value == float("-inf"):
             return 'float("-inf")'
         if value != value:
             return 'float("nan")'
-        return repr(value)
-    if isinstance(value, str):
-        return repr(value)
-    if isinstance(value, list):
-        return "[" + ", ".join(_python_literal(item) for item in value) + "]"
-    if isinstance(value, tuple):
-        if len(value) == 1:
-            return f"({_python_literal(value[0])},)"
-        return "(" + ", ".join(_python_literal(item) for item in value) + ")"
-    if isinstance(value, dict):
-        items = ", ".join(
-            f"{_python_literal(str(key))}: {_python_literal(item)}" \
-                for key, item in value.items())
-        return "{" + items + "}"
+        return f"{value}"
+    if value_type == "str":
+        return f'"{value["default_value"]}"'
+    new_indent = indent + "    "
+    if value_type == "array":
+        return "[\n" + ",\n".join(
+            f"{new_indent}{_python_as_string(item, new_indent)}" for item in value.get("elements", [])
+        ) + f"\n{indent}]"
+    if value_type == "object":
+        return "{\n" + ",\n".join(
+            f"{new_indent}'{str(key)}': " + _python_as_string(item, new_indent)
+            for key, item in value.get("fields", {}).items()
+        ) + f"\n{indent}}}"
     return repr(str(value))
 
 
@@ -295,11 +298,8 @@ def _build_component_parameters_source(payload: dict[str, Any]) -> str:
         "", "", "class ComponentParameters:"]
 
     for name, value in payload.items():
-        if "default_value" not in value:
-            lines.append(f"    {name} = None")
-            continue
         lines.append(
-            f"    {name} = {_python_literal(value['default_value'])}")
+            f"    {name} = {_python_as_string(value, indent='    ')}")
     if len(payload) == 0:
         lines.append("    pass")
 

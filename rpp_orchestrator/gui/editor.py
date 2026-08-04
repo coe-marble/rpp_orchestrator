@@ -595,7 +595,6 @@ class WorkspaceEditor(QWidget):
                 )
                 child_item.setBackground(0, instance_color)
                 spec_item.addChild(child_item)
-                record = self.workspace.get_subcomponent(record.id, key)
                 self._populate_component_children(child_item,
                         subcomponent_record, node_path + (key,))
 
@@ -621,8 +620,6 @@ class WorkspaceEditor(QWidget):
         if "root" in payload and payload["root"] is True:
             self._reset_part_views()
             return
-
-
 
         if "subcomponent_spec" in payload and payload["subcomponent_spec"] is True:
             # Handle subcomponent spec selection
@@ -743,7 +740,7 @@ class WorkspaceEditor(QWidget):
         self.current_part_id = descriptor.id
         self.current_part_source = "script"
         self.current_part_saved_name = descriptor.name
-        self.part_title.setText(context["Name"])
+        self.part_title.setText(context["record"].name)
         self.part_path_label.setText(str(folder))
         self.part_name_editor.setEnabled(True)
         self.part_name_editor.setText(descriptor.name)
@@ -838,7 +835,7 @@ class WorkspaceEditor(QWidget):
 
     def open_selected_part_parameters(self) -> None:
         current_part_folder = self.workspace \
-            .get_component(self.current_part_id).folder
+            .resolve_linked_folder(self.current_part_id)
         params_path = self.workspace.component_parameter_store\
             .ensure_parameters_file(current_part_folder)
         try:
