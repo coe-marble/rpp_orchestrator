@@ -553,18 +553,23 @@ class Workspace:
                 + f" does not match slot type '{script_h.slots.get(component_key)}'"
                 + f" for slot '{component_key}'.")
 
+        new_item = {
+            "Id": record.id,
+            "PluginName": record.plugin_name,
+        }
+
         if isinstance(existing, list):
-            if record.id not in existing:
-                existing.append(record.id)
+            if not any(item.get("Id") == record.id for item in existing):
+                existing.append(new_item)
             components[component_key] = existing
         elif existing is not None:
             # Convert single id to list
-            if existing != record.id:
-                components[component_key] = [existing, record.id]
+            if existing["Id"] == record.id:
+                components[component_key] = [existing, new_item]
             else:
                 components[component_key] = [existing]
         else:
-            components[component_key] = [record.id]
+            components[component_key] = [new_item]
         self.write_script_description(script_h.path, script_h.language, components)
 
     def build_assignments_payload(self, script_path, language, assignments):

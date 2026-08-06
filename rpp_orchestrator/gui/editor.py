@@ -182,6 +182,10 @@ class WorkspaceEditor(QWidget):
         self.part_open_plugin_manager_button.clicked.connect(self.open_plugin_manager)
         self.part_open_plugin_manager_button.setEnabled(True)
 
+        self.part_refresh_plugins = QPushButton("Refresh Plugins", self)
+        self.part_refresh_plugins.clicked.connect(self._refresh_plugins)
+        self.part_refresh_plugins.setEnabled(True)
+
         self.part_save_name_button = QPushButton("Save Description", self)
         self.part_save_name_button.clicked.connect(self.save_selected_part_description)
         self.part_save_name_button.setEnabled(False)
@@ -241,6 +245,7 @@ class WorkspaceEditor(QWidget):
         script_actions_layout.addWidget(self.delete_script_button)
         script_actions_layout.addWidget(self.open_context_button)
         script_actions_layout.addWidget(self.part_open_plugin_manager_button)
+        script_actions_layout.addWidget(self.part_refresh_plugins)
 
         script_panel = QWidget(self)
         script_panel_layout = QVBoxLayout(script_panel)
@@ -249,7 +254,7 @@ class WorkspaceEditor(QWidget):
         script_panel_layout.addWidget(self.script_list, 2)
         script_panel_layout.addWidget(self.workspace_components_label)
         script_panel_layout.addWidget(self.script_part_tree, 2)
-        script_panel_layout.addWidget(script_actions)
+        script_panel_layout.addWidget(script_actions, 2)
         script_panel.setMaximumWidth(500)
 
         part_details = QWidget(self)
@@ -428,11 +433,12 @@ class WorkspaceEditor(QWidget):
         assignments = script_handle.load_description()
 
         records_by_id = self.workspace.part_records
-        for component_key, component_ids in assignments["Components"].items():
+        for component_key, items in assignments["Components"].items():
             assigned_records = []
-            if not isinstance(component_ids, list):
-                component_ids = [component_ids]
-            for component_id in component_ids:
+            if not isinstance(items, list):
+                items = [items]
+            for item in items:
+                component_id = item.get("Id")
                 record = records_by_id.get(str(component_id))
                 if record is not None:
                     assigned_records.append(record)
@@ -1382,4 +1388,9 @@ class WorkspaceEditor(QWidget):
 
     def _load_plugins(self) -> None:
         self.available_plugins = self.lib_manager.get_available_plugins()
+
+    def _refresh_plugins(self) -> None:
+        self._load_plugin_types()
+        self._load_plugins()
+        self.log_message("Plugin types and available plugins refreshed.")
 
