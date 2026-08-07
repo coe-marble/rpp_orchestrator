@@ -14,7 +14,7 @@ def setup_test_plugins(rpp_home) -> LibraryManager:
     controller_source.write_text(
         "\n".join(
             [
-                "from rpp_plugin_types.rpp_common import MotionController2D",
+                "from rpp_plugin_types.rpp_testing import MotionController2D",
                 "",
                 "",
                 "class MockControllerPlugin(MotionController2D):",
@@ -35,7 +35,7 @@ def setup_test_plugins(rpp_home) -> LibraryManager:
     disturbance_source.write_text(
         "\n".join(
             [
-                "from rpp_plugin_types.rpp_common import DisturbanceGenerator2D",
+                "from rpp_plugin_types.rpp_testing import DisturbanceGenerator2D",
                 "from rpp_py.plugin import ParameterDescription",
                 "class MockDisturbanceGeneratorPlugin(DisturbanceGenerator2D):",
                 "    PARAMETERS = [",
@@ -60,12 +60,12 @@ def setup_test_plugins(rpp_home) -> LibraryManager:
     controller_with_single_component_source.write_text(
         "\n".join(
             [
-                "from rpp_plugin_types.rpp_common import MotionController2D",
+                "from rpp_plugin_types.rpp_testing import MotionController2D",
                 "",
                 "",
                 "class MockControllerWithSingleComponentPlugin(MotionController2D):",
                 "    COMPONENTS = {",
-                "        \"ctl1\": \"rpp_common::MotionController2D\",",
+                "        \"ctl1\": \"rpp_testing::MotionController2D\",",
                 "    }",
                 "",
                 "    def name(self) -> str:",
@@ -82,13 +82,13 @@ def setup_test_plugins(rpp_home) -> LibraryManager:
     controller_with_multiple_components_source.write_text(
         "\n".join(
             [
-                "from rpp_plugin_types.rpp_common import MotionController2D",
+                "from rpp_plugin_types.rpp_testing import MotionController2D",
                 "",
                 "",
                 "class MockControllerWithMultipleComponentsPlugin(MotionController2D):",
                 "    COMPONENTS = {",
-                "        \"ctl1\": \"rpp_common::MotionController2D\",",
-                "        \"ctl2\": \"rpp_common::MotionController2D\",",
+                "        \"ctl1\": \"rpp_testing::MotionController2D\",",
+                "        \"ctl2\": \"rpp_testing::MotionController2D\",",
                 "    }",
                 "",
                 "    def name(self) -> str:",
@@ -105,12 +105,12 @@ def setup_test_plugins(rpp_home) -> LibraryManager:
     controller_with_single_component_list_source.write_text(
         "\n".join(
             [
-                "from rpp_plugin_types.rpp_common import MotionController2D",
+                "from rpp_plugin_types.rpp_testing import MotionController2D",
                 "",
                 "",
                 "class MockControllerWithSingleComponentListPlugin(MotionController2D):",
                 "    COMPONENTS = {",
-                "        \"ctl1\": [\"rpp_common::MotionController2D\"],",
+                "        \"ctl1\": [\"rpp_testing::MotionController2D\"],",
                 "    }",
                 "",
                 "    def name(self) -> str:",
@@ -208,15 +208,15 @@ from __future__ import annotations
 
 from rpp_orchestrator.orchestration_script import OrchestrationScript
 
-from rpp_plugin_types.rpp_common import MotionController2D
-from rpp_plugin_types.rpp_common import DisturbanceGenerator2D
+from rpp_plugin_types.rpp_testing import MotionController2D
+from rpp_plugin_types.rpp_testing import DisturbanceGenerator2D
 
 
 
 class Example(OrchestrationScript):
     COMPONENTS = {
-        "ctl_main": "rpp_common::MotionController2D",
-        "ctl_disturbance": "rpp_common::DisturbanceGenerator2D",
+        "ctl_main": "rpp_testing::MotionController2D",
+        "ctl_disturbance": "rpp_testing::DisturbanceGenerator2D",
     }
     def run(self) -> None:
         raise NotImplementedError("Define the workspace logic here.")

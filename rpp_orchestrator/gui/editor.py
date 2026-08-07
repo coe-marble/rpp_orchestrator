@@ -806,7 +806,7 @@ class WorkspaceEditor(QWidget):
         info = self.get_plugin_info(plugin_name, plugin_type, library)
 
         file_path = self.lib_manager.get_plugin_path_absolute(
-            info["PluginPath"], library)
+            info["SourceFile"], library)
 
         _open_in_system_editor(file_path)
 

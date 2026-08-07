@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from rpp_orchestrator.orchestration_script import OrchestrationScript
 
-from rpp_plugin_types.rpp_common import MotionController2D
-from rpp_plugin_types.rpp_common import DisturbanceGenerator2D
+from rpp_plugin_types.rpp_testing import MotionController2D
+from rpp_plugin_types.rpp_testing import DisturbanceGenerator2D
 
 
 COMPONENTS = {

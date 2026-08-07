@@ -8,7 +8,7 @@ from rpp_orchestrator.workspace import ComponentRecord
 
 
 test_plugin_src = """
-from rpp_plugin_types.rpp_common import MotionController2D
+from rpp_plugin_types.rpp_testing import MotionController2D
 class TestPlugin(MotionController2D):
     def name(self) -> str:
         return "test_plugin"
@@ -40,19 +40,19 @@ def temp_workspace(tmp_path):
 def test_script_source_update_with_new_slots(temp_workspace: Workspace):
     ws = temp_workspace
     script = ws.create_script("main")
-    script.add_component_slot("ctl_main", "rpp_common::MotionController2D")
-    script.add_component_slot("sensor_main", "rpp_common::Sensor2D")
+    script.add_component_slot("ctl_main", "rpp_testing::MotionController2D")
+    script.add_component_slot("sensor_main", "rpp_testing::Sensor2D")
 
     # Read the script source and check that the slots are present
     source = script.path.read_text(encoding="utf-8")
-    assert '"ctl_main":"rpp_common::MotionController2D"' in source
-    assert '"sensor_main":"rpp_common::Sensor2D"' in source
+    assert '"ctl_main":"rpp_testing::MotionController2D"' in source
+    assert '"sensor_main":"rpp_testing::Sensor2D"' in source
 
     # Now remove a slot and check that the source is updated
     script.remove_component_slot("ctl_main")
     source = script.path.read_text(encoding="utf-8")
-    assert '"ctl_main":"rpp_common::MotionController2D"' not in source
-    assert '"sensor_main":"rpp_common::Sensor2D"' in source
+    assert '"ctl_main":"rpp_testing::MotionController2D"' not in source
+    assert '"sensor_main":"rpp_testing::Sensor2D"' in source
 
 def test_script_source_update_with_new_slots_no_components_field(temp_workspace: Workspace):
     ws = temp_workspace
@@ -64,15 +64,15 @@ class Main:
 ''')
 
     # Now add a new component slot and check that the source is updated
-    script.add_component_slot("ctl_main", "rpp_common::MotionController2D")
+    script.add_component_slot("ctl_main", "rpp_testing::MotionController2D")
     source = script.path.read_text(encoding="utf-8")
     assert 'COMPONENTS = {' in source
-    assert '"ctl_main":"rpp_common::MotionController2D"' in source
+    assert '"ctl_main":"rpp_testing::MotionController2D"' in source
 
 def test_create_component_with_inexisting_library_raises(temp_workspace: Workspace):
     ws = temp_workspace
     script = ws.create_script("main")
-    script.add_component_slot("ctl_main", "rpp_common::MotionController2D")
+    script.add_component_slot("ctl_main", "rpp_testing::MotionController2D")
 
     component_name = "Controller1"
     plugin_name = "rpp::Controller"
@@ -87,10 +87,10 @@ def test_create_component_with_inexisting_library_raises(temp_workspace: Workspa
 def test_add_component_with_wrong_plugin_type_raises(temp_workspace: Workspace):
     ws = temp_workspace
     script = ws.create_script("main")
-    script.add_component_slot("ctl_main", "rpp_common::MotionController2D")
+    script.add_component_slot("ctl_main", "rpp_testing::MotionController2D")
 
     component_name = "Controller1"
-    plugin_name = "rpp_common::Controller1"
+    plugin_name = "rpp_testing::Controller1"
     # Attempt to create a component with a plugin type that doesn't match the slot
     with pytest.raises(ValueError) as excinfo:
         ws.create_component(
@@ -102,7 +102,7 @@ def test_add_component_with_wrong_plugin_type_raises(temp_workspace: Workspace):
 def test_add_component_and_assign_to_script(temp_workspace : Workspace):
     ws = temp_workspace
     script = ws.create_script("main")
-    script.add_component_slot("ctl_main", "rpp_common::MotionController2D")
+    script.add_component_slot("ctl_main", "rpp_testing::MotionController2D")
 
     component_name = "Controller1"
     plugin_name = "testlib::TestPlugin"
@@ -122,7 +122,7 @@ def test_add_component_and_assign_to_script(temp_workspace : Workspace):
 def test_add_component_and_assign_to_script_with_wrong_plugin_type(temp_workspace : Workspace):
     ws = temp_workspace
     script = ws.create_script("main")
-    script.add_component_slot("ctl_main", "rpp_common::MotionController3D")
+    script.add_component_slot("ctl_main", "rpp_testing::MotionController3D")
 
     component_name = "Controller1"
     plugin_name = "testlib::TestPlugin"
@@ -142,7 +142,7 @@ def test_add_component_and_assign_to_script_with_wrong_plugin_type(temp_workspac
 def test_remove_component_from_script(temp_workspace):
     ws = temp_workspace
     script = ws.create_script("main")
-    script.add_component_slot("ctl_main", "rpp_common::MotionController2D")
+    script.add_component_slot("ctl_main", "rpp_testing::MotionController2D")
 
     component_name = "Controller1"
     plugin_name = "testlib::TestPlugin"

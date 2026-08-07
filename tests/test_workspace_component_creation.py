@@ -26,7 +26,6 @@ if str(REPO_ROOT) not in sys.path:
 
 from rpp_orchestrator.component_storage import LinkedComponentRecord
 from rpp_orchestrator.workspace import create_workspace, open_workspace, default_script_source
-from rpp_common import ParameterDescription
 from rpp_plugin_registrator.library_manager import LibraryManager
 from rpp_plugin_registrator import registry_config as rp
 from rpp_orchestrator.workspace import Workspace, ComponentRecord
@@ -59,9 +58,9 @@ def test_setup_registers_mock_plugins_for_available_plugins(setup_plugins: Libra
 
     assert "MockLib" in plugins
 
-    controller_item = next((item for item in plugins["MockLib"]["rpp_common::MotionController2D"] \
+    controller_item = next((item for item in plugins["MockLib"]["rpp_testing::MotionController2D"] \
             if item.get("PluginName") == "MockLib::MockControllerPlugin"), None)
-    disturbance_item = next((item for item in plugins["MockLib"]["rpp_common::DisturbanceGenerator2D"] \
+    disturbance_item = next((item for item in plugins["MockLib"]["rpp_testing::DisturbanceGenerator2D"] \
             if item.get("PluginName") == "MockLib::MockDisturbanceGeneratorPlugin"), None)
 
     assert controller_item is not None
@@ -78,8 +77,8 @@ def test_mock_script_components_are_plugin_types(setup_plugins: LibraryManager) 
 
     components = module.Example.COMPONENTS
 
-    assert components["ctl_main"] == "rpp_common::MotionController2D"
-    assert components["ctl_disturbance"] == "rpp_common::DisturbanceGenerator2D"
+    assert components["ctl_main"] == "rpp_testing::MotionController2D"
+    assert components["ctl_disturbance"] == "rpp_testing::DisturbanceGenerator2D"
 
 
 def test_write_components_roundtrip(tmp_path: Path) -> None:
@@ -90,8 +89,8 @@ def test_write_components_roundtrip(tmp_path: Path) -> None:
         "ScriptPath": str(script_path),
         "Language": "python",
         "Components": {
-            "planner": "rpp_common::MotionPlanner",
-            "estimator": "rpp_common::Estimator",
+            "planner": "rpp_testing::MotionPlanner",
+            "estimator": "rpp_testing::DisturbanceGenerator2D",
         }
     }
 
@@ -162,7 +161,7 @@ def test_create_part_folder_writes_unique_descriptor(setup_plugins, rpp_home) ->
     assert descriptor.id
     assert descriptor.name == "component1"
     assert descriptor.plugin_name == "MockLib::MockControllerPlugin"
-    assert descriptor.plugin_type == "rpp_common::MotionController2D"
+    assert descriptor.plugin_type == "rpp_testing::MotionController2D"
     assert descriptor.folder == record.folder
     assert workspace.part_parameters_path(record.folder).exists()
 
@@ -238,7 +237,7 @@ def test_create_subcomponent_pass(setup_plugins, rpp_home) -> None:
     assert first.parent_component_info.plugin_name == parent.plugin_name
     assert first.name == "controller1"
     assert first.plugin_name == "MockLib::MockControllerPlugin"
-    assert first.plugin_type == "rpp_common::MotionController2D"
+    assert first.plugin_type == "rpp_testing::MotionController2D"
     assert first.library == "MockLib"
 
     parent_descriptor = workspace.read_part_descriptor(parent.folder)
@@ -319,24 +318,24 @@ def test_assign_or_create_component_dialog_initialization_with_plugins_and_compo
 
     # Simulate workspace components
     workspace_components = {
-        "rpp_common::MotionController2D": [
+        "rpp_testing::MotionController2D": [
             ComponentRecord(
                 id="12345678-1234-5678-1234-567812345678",
                 name="existing_component",
                 plugin_name="MockLib::MockControllerPlugin",
-                plugin_type="rpp_common::MotionController2D",
+                plugin_type="rpp_testing::MotionController2D",
                 folder=Path("/tmp/existing_component"),
                 library="MockLib",
                 parent_component_info=None,
                 subcomponent_spec={},
             )
         ],
-        "rpp_common::DisturbanceGenerator2D": [
+        "rpp_testing::DisturbanceGenerator2D": [
             ComponentRecord(
                 id="87654321-4321-8765-4321-876543218765",
                 name="existing_disturbance",
                 plugin_name="MockLib::MockDisturbanceGeneratorPlugin",
-                plugin_type="rpp_common::DisturbanceGenerator2D",
+                plugin_type="rpp_testing::DisturbanceGenerator2D",
                 folder=Path("/tmp/existing_disturbance"),
                 library="MockLib",
                 parent_component_info=None,
@@ -399,7 +398,7 @@ def test_assign_or_create_component_dialog_initialization_with_plugins_and_compo
         parent=None,
         workspace_components=workspace_components,
         available_plugins=entries_by_library,
-        plugin_type="rpp_common::MotionController2D",
+        plugin_type="rpp_testing::MotionController2D",
         offer_assign=True
     )
 
