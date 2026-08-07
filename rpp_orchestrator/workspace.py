@@ -385,7 +385,8 @@ class Workspace:
         return None
 
     def remove_component_from_script(self,
-            script_h: ScriptHandle, component_id: str, component_key: str | None) -> None:
+            script_h: ScriptHandle, component_id: str,
+            component_key: str | None = None) -> None:
         removed_id = component_id.strip()
         if not removed_id:
             raise ValueError("Component ID to remove cannot be empty.")
@@ -398,21 +399,15 @@ class Workspace:
         description = self.read_script_description(script_h.path)
         assignments = description.get("Components", {}) if description else {}
         if key is not None:
-            component_ids = assignments.get(key)
-            if not component_ids:
-                return
-
-            assignments[key] = [item for item in component_ids if item != removed_id]
+            assignments[key] = [item for item in assignments[key] if item["Id"] != removed_id]
             if not assignments[key]:
                 assignments.pop(key, None)
         else:
             # Remove the component from all keys
             for k in list(assignments.keys()):
-                component_ids = assignments[k]
-                if removed_id in component_ids:
-                    assignments[k] = [item for item in component_ids if item != removed_id]
-                    if not assignments[k]:
-                        assignments.pop(k, None)
+                assignments[k] = [item for item in assignments[k] if item["Id"] != removed_id]
+                if not assignments[k]:
+                    assignments.pop(k, None)
 
         self.write_script_description(script_h.path, script_h.language, assignments)
 

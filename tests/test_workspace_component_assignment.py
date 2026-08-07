@@ -116,7 +116,8 @@ def test_add_component_and_assign_to_script(temp_workspace : Workspace):
     # Should appear in both workspace and script assignments
     assert record.folder.exists()
     description = ws.read_script_description(script.path)
-    assert "ctl_main" in description["Components"] and record.id in description["Components"]["ctl_main"]
+    ids = [x["Id"] for x in description["Components"]["ctl_main"]]
+    assert "ctl_main" in description["Components"] and record.id in ids
 
 def test_add_component_and_assign_to_script_with_wrong_plugin_type(temp_workspace : Workspace):
     ws = temp_workspace
@@ -154,11 +155,20 @@ def test_remove_component_from_script(temp_workspace):
 
     assert record.folder.exists()
     description = ws.read_script_description(script.path)
-    assert "ctl_main" in description["Components"] and record.id in description["Components"]["ctl_main"]
+    ids = [x["Id"] for x in description["Components"]["ctl_main"]]
+    assert "ctl_main" in description["Components"] and record.id in ids
 
     # Now remove the component from the script
     ws.remove_component_from_script(script, record.id, "ctl_main")
     description = ws.read_script_description(script.path)
+    assert "ctl_main" not in description["Components"]
+    assert record.folder.exists()  # The component folder should still exist in the workspace
+    assert ws.get_part_record_by_id(record.id) is not None  # The record should still exist in the workspace
+
+    ws.assign_component_to_script(script, "ctl_main", record.id)
+    # Now remove the component from all script keys
+    ws.remove_component_from_script(script, record.id)
+
     assert "ctl_main" not in description["Components"]
     assert record.folder.exists()  # The component folder should still exist in the workspace
     assert ws.get_part_record_by_id(record.id) is not None  # The record should still exist in the workspace
