@@ -2,13 +2,10 @@ from __future__ import annotations
 
 from rpp_orchestrator.orchestration_script import OrchestrationScript
 
-from rpp_plugin_types.rpp_testing import MotionController2D
-from rpp_plugin_types.rpp_testing import DisturbanceGenerator2D
-
 
 COMPONENTS = {
-    "ctl_main": MotionController2D,
-    "ctl_disturbance": DisturbanceGenerator2D,
+    "ctl_main": "rpp_testing::MotionController2D",
+    "ctl_disturbance": "rpp_testing::DisturbanceGenerator2D",
 }
 
 class MockWorkspace(OrchestrationScript):

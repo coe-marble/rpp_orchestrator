@@ -140,7 +140,7 @@ def test_create_mock_workspace_populated(setup_plugins, tmp_path: Path, rpp_home
     assert len(records) == 10
     for r in records.values():
         assert r.folder.exists()
-        assert ws.part_descriptor_path(r.folder).exists()
+        assert Workspace.part_description_path(r.folder).exists()
         assert ws.part_parameters_path(r.folder).exists()
         if r.parent_component_info:
             assert r.parent_component_info.id in records
@@ -231,7 +231,7 @@ def test_create_subcomponent_pass(setup_plugins, rpp_home) -> None:
         "MockLib::MockControllerPlugin",
     )
 
-
+    
     assert first.folder.exists()
     assert first.parent_component_info.id == parent.id
     assert first.parent_component_info.plugin_name == parent.plugin_name
@@ -268,6 +268,74 @@ def test_create_subcomponent_pass(setup_plugins, rpp_home) -> None:
     assert second.id == parent_descriptor_after_second.subcomponents[slot_name].id
     assert second.plugin_type == parent_descriptor_after_second.subcomponents[slot_name].plugin_type
     assert second.name == "controller2"
+
+def test_create_subcomponent_list_slot_pass(setup_plugins, rpp_home) -> None:
+    workspace = create_workspace(rpp_home / "beta_sub_list", name="beta_sub_list")
+
+    parent = workspace.create_component(
+        "parent_component", "MockLib::MockControllerWithSingleComponentListPlugin"
+    )
+
+    slot_name = "ctl1"
+    first = workspace.create_subcomponent(
+        parent.folder,
+        slot_name,
+        "controller1",
+        "MockLib::MockControllerPlugin",
+    )
+
+    second = workspace.create_subcomponent(
+        parent.folder,
+        slot_name,
+        "controller2",
+        "MockLib::MockControllerPlugin",
+    )
+
+    assert first.folder.exists()
+    assert second.folder.exists()
+    assert first.id != second.id
+
+    parent_descriptor_after_second = workspace.read_part_descriptor(parent.folder)
+    assert isinstance(parent_descriptor_after_second.subcomponents, dict) and parent_descriptor_after_second.subcomponents
+    assert slot_name in parent_descriptor_after_second.subcomponents
+    subcomponents_list = parent_descriptor_after_second.subcomponents[slot_name]
+    assert isinstance(subcomponents_list, list)
+    assert len(subcomponents_list) == 2
+    assert {sub.id for sub in subcomponents_list} == {first.id, second.id}
+
+def test_create_subcomponent_options_slot_pass(setup_plugins, rpp_home) -> None:
+    workspace = create_workspace(rpp_home / "beta_sub_options", name="beta_sub_options")
+
+    parent = workspace.create_component(
+        "parent_component", "MockLib::MockControllerWithOptionsComponentPlugin"
+    )
+
+    slot_name = "ctl1"
+    first = workspace.create_subcomponent(
+        parent.folder,
+        slot_name,
+        "controller1",
+        "MockLib::MockControllerPlugin",
+    )
+
+    second = workspace.create_subcomponent(
+        parent.folder,
+        slot_name,
+        "controller2",
+        "MockLib::MockControllerPlugin",
+    )
+
+    assert first.folder.exists()
+    assert second.folder.exists()
+    assert first.id != second.id
+
+    parent_descriptor_after_second = workspace.read_part_descriptor(parent.folder)
+    assert isinstance(parent_descriptor_after_second.subcomponents, dict) and parent_descriptor_after_second.subcomponents
+    assert slot_name in parent_descriptor_after_second.subcomponents
+    subcomponents_list = parent_descriptor_after_second.subcomponents[slot_name]
+    assert isinstance(subcomponents_list, list)
+    assert len(subcomponents_list) == 2
+    assert {sub.id for sub in subcomponents_list} == {first.id, second.id}
 
 def test_create_part_folder_seeds_parameters_from_param_description(setup_plugins, tmp_path: Path) -> None:
     workspace = create_workspace(tmp_path / "gamma", name="gamma")
@@ -415,8 +483,8 @@ def test_assign_or_create_component_dialog_initialization_with_plugins_and_compo
 
     plugin_children = lib_children.children[0]
 
-    assert plugin_children.addChild.call_count == 4, \
-        f"Expected 4 plugin children, got {plugin_children.addChild.call_count}"
+    assert plugin_children.addChild.call_count == 5, \
+        f"Expected 5 plugin children, got {plugin_children.addChild.call_count}"
 
 
 def test_load_available_plugins_groups_entries_by_library(setup_plugins: LibraryManager) -> None:

@@ -36,6 +36,7 @@ from rpp_orchestrator.component_storage import LinkedComponentRecord, ComponentR
 from rpp_orchestrator.gui.new_script_dialog import NewScriptDialog
 
 from rpp_plugin_registrator.library_manager import LibraryManager
+from rpp_py.context import ComponentContext
 
 from .assign_or_create_component_dialog import create_assign_or_create_component_dialog
 from ..vscode_debug_config_service import VscodeDebugConfigService
@@ -527,7 +528,8 @@ class WorkspaceEditor(QWidget):
 
         specs = {}
         for key in subcomponent_spec:
-            plugin_type = record.subcomponent_spec[key]
+            plugin_type, _ = ComponentContext.parse_component_slot_type(
+                record.subcomponent_spec[key])
             child_item = QTreeWidgetItem([f"{key} ({plugin_type})"])
             path = node_path + (key,)
             child_item.setData(
@@ -547,19 +549,26 @@ class WorkspaceEditor(QWidget):
                 self.COMPONENT_COLORS.get("component_key", "#FFFFFF"))
             parent_item.addChild(child_item)
 
+        def resolve_instance_color(sub_record: ComponentRecord | LinkedComponentRecord) -> QColor:
+            if isinstance(sub_record, LinkedComponentRecord):
+                instance_color = self.COMPONENT_COLORS.get("linked_component_ok", "#FFFFFF")
+                if not self.workspace.is_linked_component_valid(sub_record):
+                    return self.COMPONENT_COLORS.get("linked_component_failed", "#FFFFFF")
+                return instance_color
+            else:
+                return self.COMPONENT_COLORS.get("component_instance", "#FFFFFF")
+
+
+
         for key, value in subcomponents.items():
+            if value is None or len(value) == 0:
+                continue
             spec_item = specs.get(key)
             assert spec_item is not None, f"Spec item for key '{key}' not found."
 
             subcomponent_record = self.workspace.get_subcomponent(record.id, key)
             child_node_path = node_path + (key,)
 
-            if isinstance(subcomponent_record, LinkedComponentRecord):
-                instance_color = self.COMPONENT_COLORS.get("linked_component_ok", "#FFFFFF")
-                if not self.workspace.is_linked_component_valid(subcomponent_record):
-                    instance_color = self.COMPONENT_COLORS.get("linked_component_failed", "#FFFFFF")
-            else:
-                instance_color = self.COMPONENT_COLORS.get("component_instance", "#FFFFFF")
 
             if subcomponent_record is None:
                 continue
@@ -580,6 +589,7 @@ class WorkspaceEditor(QWidget):
                             "id": str(subcomponent_record[idx].id),
                         },
                     )
+                    instance_color = resolve_instance_color(subcomponent_record[idx])
                     child_item.setBackground(0, instance_color)
                     spec_item.addChild(child_item)
                     self._populate_component_children(child_item,
@@ -599,6 +609,7 @@ class WorkspaceEditor(QWidget):
                         "id": str(subcomponent_record.id),
                     },
                 )
+                instance_color = resolve_instance_color(subcomponent_record)
                 child_item.setBackground(0, instance_color)
                 spec_item.addChild(child_item)
                 self._populate_component_children(child_item,
@@ -1097,7 +1108,6 @@ class WorkspaceEditor(QWidget):
         else:
             self.log_message("No valid selection for Add Component.")
             return
-
         dialog = create_assign_or_create_component_dialog(
                 self, self.workspace_components,
                 self.available_plugins, plugin_type=plugin_type,

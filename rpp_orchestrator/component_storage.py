@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace as dataclasses_replace
 import importlib.util
-import keyword
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -62,19 +61,20 @@ class SubcomponentInfo:
             "PluginName": self.plugin_name,
             "SlotName": self.slot_name,
             "Library": self.library,
-            "Folder": str(self.folder),
             "IsLinked": self.is_linked,
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, object]) -> "SubcomponentInfo":
+    def from_dict(cls, data: dict[str, object], parent_folder: Path) -> "SubcomponentInfo":
+        folder = parent_folder / ComponentLayout.subcomponents_dir \
+             / data["Id"]
         return cls(
             id=str(data["Id"]),
             plugin_type=str(data["PluginType"]),
             plugin_name=str(data["PluginName"]),
             slot_name=str(data["SlotName"]),
             library=str(data["Library"]),
-            folder=Path(data["Folder"]),
+            folder=folder,
             is_linked=bool(data.get("IsLinked", False)),
         )
 
@@ -157,10 +157,10 @@ class ComponentRecord:
             for key, sub in data["Subcomponents"].items():
                 if isinstance(sub, list):
                     parsed_subcomponents[key] = \
-                        [SubcomponentInfo.from_dict(s) for s in sub]
+                        [SubcomponentInfo.from_dict(s, folder) for s in sub]
                 else:
                     parsed_subcomponents[key] = \
-                        SubcomponentInfo.from_dict(sub)
+                        SubcomponentInfo.from_dict(sub, folder)
 
         return cls(
             id=str(data["Id"]),
@@ -563,6 +563,7 @@ class ComponentDataStore:
         folder.mkdir(parents=True, exist_ok=True)
         parameters = plugin_info["PluginMetadata"].get("Parameters", {})
         self.ensure_component_folder(folder, parameters)
+
 
         sub_info = SubcomponentInfo(
             id=record_id,

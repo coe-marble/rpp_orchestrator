@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 import json
 import shutil
 from typing import Any, Generator
+
+from rpp_orchestrator.layout import ComponentLayout
 from rpp_plugin_registrator.library_manager import LibraryManager
+from rpp_py.context import ComponentContext
 
 from .component_storage import (
     ComponentDataStore,
@@ -37,6 +41,20 @@ def _json_load(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+@dataclass(frozen=True)
+class ScriptDescription:
+    script_path: Path
+    language: str
+    components: dict[str, list[dict[str, str]]]
+    spec: dict[str, str]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ScriptPath": str(self.script_path),
+            "Language": self.language,
+            "Components": self.components,
+            "Spec": self.spec
+        }
 
 
 class Workspace:
@@ -163,7 +181,7 @@ class Workspace:
     def ensure_script_assignments(self, script_path: Path) -> None:
         assignments_path = self.get_script_description_path(script_path)
         if not assignments_path.exists():
-            self.write_script_description(script_path, DEFAULT_SCRIPT_LANGUAGE, {})
+            self.write_script_description(script_path, DEFAULT_SCRIPT_LANGUAGE, {}, {})
 
     def load_script(self, script_path: Path) -> ScriptHandle:
         if not script_path.exists():
@@ -201,7 +219,7 @@ class Workspace:
         else:
             default_source = default_script_source(script_path=script_path)
             script_path.write_text(default_source, encoding="utf-8")
-        self.write_script_description(script_path, language, {})
+        self.write_script_description(script_path, language, {}, {})
         return ScriptHandle(path=script_path, ws=self, language=language)
 
     def delete_script(self, script_path: Path) -> None:
@@ -333,11 +351,12 @@ class Workspace:
             record: ComponentRecord) -> Path:
         return self.component_data_store.save_description(folder, record)
 
-    def part_descriptor_path(self, folder: Path) -> Path:
-        description_path = folder / "description.json"
+    @classmethod
+    def part_description_path(cls, folder: Path) -> Path:
+        description_path = folder / ComponentLayout.description_filename
         if description_path.exists():
             return description_path
-        raise FileNotFoundError(f"No part descriptor JSON found in: {folder}")
+        return None
 
     def part_parameters_path(self, folder: Path) -> Path:
         return self.component_parameter_store.parameters_path(folder)
@@ -409,7 +428,7 @@ class Workspace:
                 if not assignments[k]:
                     assignments.pop(k, None)
 
-        self.write_script_description(script_h.path, script_h.language, assignments)
+        self.write_script_description(script_h.path, script_h.language, assignments, script_h.slots)
 
     def remove_component(self, record_id: str) -> None:
         component_record = self.get_part_record_by_id(record_id)
@@ -515,11 +534,13 @@ class Workspace:
         return duplicated_record
 
     def write_script_description(self,
-            script_path: Path, language: str, assignments: dict[str, list[str]]) -> None:
+            script_path: Path, language: str,
+            assignments: dict[str, list[str]],
+            spec: dict[str, str]) -> None:
         assignments_path = self.get_script_description_path(script_path)
-        payload = self.build_assignments_payload(script_path, language, assignments)
+        payload = self.build_assignments_payload(script_path, language, assignments, spec)
         assignments_path.write_text(
-            json.dumps(payload, indent=4, sort_keys=False),
+            json.dumps(payload.to_dict(), indent=4, sort_keys=False),
             encoding="utf-8",
         )
 
@@ -565,14 +586,18 @@ class Workspace:
                 components[component_key] = [existing]
         else:
             components[component_key] = [new_item]
-        self.write_script_description(script_h.path, script_h.language, components)
+        self.write_script_description(script_h.path, script_h.language, components, script_h.slots)
 
-    def build_assignments_payload(self, script_path, language, assignments):
-        return {
-            "ScriptPath": str(script_path),
-            "Language": language,
-            "Components": assignments,
-        }
+    def build_assignments_payload(self,
+            script_path: Path, language: str,
+            assignments: dict[str, list[str]],
+            spec: dict[str, str]) -> ScriptDescription:
+        return ScriptDescription(
+            script_path=script_path,
+            language=language,
+            components=assignments,
+            spec=spec
+        )
 
     def can_remove_component(self, record_id: str) -> bool:
         for c in self.part_records.values():
@@ -595,13 +620,9 @@ class Workspace:
             raise ValueError(f"Plugin '{plugin_name}'"
                 + f" does not have a component slot named '{slot_name}'")
 
-        slot_type = components[slot_name]
-        allow_list = False
-        overwrite = True
-        if isinstance(slot_type, list):
-            slot_type = slot_type[0]
-            allow_list = True
-            overwrite = False
+        slot_type, allow_list = ComponentContext.parse_component_slot_type(components[slot_name])
+        # If it's a list, we don't overwrite; if it's a single component, we can overwrite
+        overwrite = not allow_list
 
         return slot_type, allow_list, overwrite
 

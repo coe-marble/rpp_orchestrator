@@ -110,11 +110,32 @@ def setup_test_plugins(rpp_home) -> LibraryManager:
                 "",
                 "class MockControllerWithSingleComponentListPlugin(MotionController2D):",
                 "    COMPONENTS = {",
-                "        \"ctl1\": [\"rpp_testing::MotionController2D\"],",
+                "        \"ctl1\": \"List[rpp_testing::MotionController2D]\",",
                 "    }",
                 "",
                 "    def name(self) -> str:",
                 "        return \"MockControllerWithSingleComponentListPlugin\"",
+                "",
+                "    def execute(self, input):",
+                "        return input",
+                "",
+            ]
+        ),
+    )
+
+    controller_with_options_component_source = Path(handle.path) / handle.name / "MockControllerWithOptionsComponentPlugin.py"
+    controller_with_options_component_source.write_text(
+        "\n".join(
+            [
+                "from rpp_plugin_types.rpp_testing import MotionController2D",
+                "",
+                "class MockControllerWithOptionsComponentPlugin(MotionController2D):",
+                "    COMPONENTS = {",
+                "        \"ctl1\": \"Options[rpp_testing::MotionController2D]\",",
+                "    }",
+                "",
+                "    def name(self) -> str:",
+                "        return \"MockControllerWithOptionsComponentPlugin\"",
                 "",
                 "    def execute(self, input):",
                 "        return input",
@@ -129,6 +150,7 @@ def setup_test_plugins(rpp_home) -> LibraryManager:
     manager.register_plugin_from_source(controller_with_single_component_source, "MockLib")
     manager.register_plugin_from_source(controller_with_multiple_components_source, "MockLib")
     manager.register_plugin_from_source(controller_with_single_component_list_source, "MockLib")
+    manager.register_plugin_from_source(controller_with_options_component_source, "MockLib")
     return manager
 
 
