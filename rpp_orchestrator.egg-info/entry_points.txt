@@ -1,3 +1,2 @@
 [console_scripts]
 rpp-orchestrator = rpp_orchestrator.cli:main
-

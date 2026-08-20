@@ -19,7 +19,7 @@ FIXTURE_WORKSPACES_PATH = RPP_TESTING_PATH / "data" / "mock_workspaces"
 
 MOCK_WORKSPACE_EMPTY = FIXTURE_WORKSPACES_PATH / "empty_workspace"
 MOCK_WORKSPACE_POPULATED = FIXTURE_WORKSPACES_PATH / "mock_workspace"
-SAVE_MOCK_WORKSPACE_TO_PATH = False  # Set to True to save the mock workspace to disk for inspection
+SAVE_MOCK_WORKSPACE_TO_PATH = True  # Set to True to save the mock workspace to disk for inspection
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -91,10 +91,11 @@ def test_write_components_roundtrip(tmp_path: Path) -> None:
         "Components": {
             "planner": "rpp_testing::MotionPlanner",
             "estimator": "rpp_testing::DisturbanceGenerator2D",
-        }
+        },
+        "Spec": {}
     }
 
-    workspace.write_script_description(script_path, "python", payload["Components"])
+    workspace.write_script_description(script_path, "python", payload["Components"], {})
     read_back = workspace.read_script_description(script_path)
 
     assert read_back == payload

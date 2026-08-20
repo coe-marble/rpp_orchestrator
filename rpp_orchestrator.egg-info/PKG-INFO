@@ -1,10 +1,7 @@
-Metadata-Version: 2.1
+Metadata-Version: 2.4
 Name: rpp-orchestrator
 Version: 0.1.0
 Summary: RPP orchestration and workspace management
-Home-page: UNKNOWN
-License: UNKNOWN
-Platform: UNKNOWN
-
-UNKNOWN
-
+Requires-Dist: PyQt6
+Dynamic: requires-dist
+Dynamic: summary
