@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import copy
+import hashlib
 import json
 import shutil
 from typing import Any, Generator
@@ -25,6 +27,8 @@ from .script_handle import (
     default_script_source
 )
 
+DEFAULT_CONFIGURATION_NAME = "Default"
+
 
 def _unique_name(base_name: str, existing_names: set[str]) -> str:
     base = base_name.strip() or "Component"
@@ -45,14 +49,16 @@ def _json_load(path: Path) -> dict[str, Any]:
 class ScriptDescription:
     script_path: Path
     language: str
-    components: dict[str, list[dict[str, str]]]
+    configurations: dict[str, dict[str, Any]]
+    active_configuration: str
     spec: dict[str, str]
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "ScriptPath": str(self.script_path),
             "Language": self.language,
-            "Components": self.components,
+            "Configurations": self.configurations,
+            "ActiveConfiguration": self.active_configuration,
             "Spec": self.spec
         }
 
@@ -172,10 +178,12 @@ class Workspace:
                 json_data = _json_load(script_file)
                 script_path = json_data.get("ScriptPath")
                 if not Path(script_path).exists():
-                    script_file.unlink()  # Remove the description if the script file doesn't exist
                     continue
                 language = json_data.get("Language")
-                scripts.append(ScriptHandle(path=Path(script_path), ws=self, language=language))
+                scripts.append(ScriptHandle(
+                    path=Path(script_path), ws=self, language=language,
+                    description_path=script_file,
+                ))
         return scripts
 
     def ensure_script_assignments(self, script_path: Path) -> None:
@@ -187,7 +195,77 @@ class Workspace:
         if not script_path.exists():
             raise FileNotFoundError(f"Script file does not exist: {script_path}")
         language = next((lang for lang, spec in SCRIPT_LANGUAGES.items() if spec.extension == script_path.suffix), None)
-        return ScriptHandle(path=script_path, ws=self, language=language)
+        script_handle = ScriptHandle(path=script_path, ws=self, language=language)
+        self._set_script_binding_metadata(
+            script_handle, linked=True, script_name=str(script_path), library=None
+        )
+        return script_handle
+
+    def link_registered_script(
+        self,
+        script_path: Path,
+        script_name: str,
+        library: str,
+        language: str,
+    ) -> ScriptHandle:
+        script_path = script_path.expanduser().resolve()
+        if not script_path.exists():
+            raise FileNotFoundError(f"Script file does not exist: {script_path}")
+        description_path = self.get_script_description_path(script_path)
+        if description_path.exists():
+            existing = _json_load(description_path)
+            existing_path = Path(existing["ScriptPath"]).expanduser().resolve()
+            if existing_path == script_path:
+                script_handle = ScriptHandle(
+                    script_path, self, language=language,
+                    description_path=description_path,
+                )
+                self._set_script_binding_metadata(
+                    script_handle, linked=True,
+                    script_name=script_name, library=library,
+                )
+                return script_handle
+
+        description_path = self.get_linked_script_description_path(script_name)
+        if description_path.exists():
+            existing = _json_load(description_path)
+            existing_path = Path(existing["ScriptPath"]).expanduser().resolve()
+            if existing_path != script_path:
+                raise ValueError(f"Script identity collision for '{script_name}'.")
+        else:
+            description = self.build_assignments_payload(
+                script_path,
+                language,
+                {DEFAULT_CONFIGURATION_NAME: {"Components": {}}},
+                DEFAULT_CONFIGURATION_NAME,
+                {},
+            ).to_dict()
+            description_path.write_text(
+                json.dumps(description, indent=4, sort_keys=False), encoding="utf-8"
+            )
+        script_handle = ScriptHandle(
+            script_path, self, language=language,
+            description_path=description_path,
+        )
+        self._set_script_binding_metadata(
+            script_handle, linked=True, script_name=script_name, library=library
+        )
+        return script_handle
+
+    def _set_script_binding_metadata(
+        self,
+        script_handle: ScriptHandle,
+        *,
+        linked: bool,
+        script_name: str,
+        library: str | None,
+    ) -> None:
+        description = self.read_script_description(script_handle.path)
+        description["Linked"] = linked
+        description["ScriptName"] = script_name
+        description["ScriptLibrary"] = library
+        description["Spec"] = script_handle.slots
+        self._write_script_description_payload(description, script_handle.path)
 
     def create_script(self,
             script_path_or_name: Path | str, source: str | None = None,
@@ -220,11 +298,24 @@ class Workspace:
             default_source = default_script_source(script_path=script_path)
             script_path.write_text(default_source, encoding="utf-8")
         self.write_script_description(script_path, language, {}, {})
-        return ScriptHandle(path=script_path, ws=self, language=language)
+        script_handle = ScriptHandle(path=script_path, ws=self, language=language)
+        self._set_script_binding_metadata(
+            script_handle,
+            linked=False,
+            script_name=script_path.stem,
+            library=self.name,
+        )
+        return script_handle
 
-    def delete_script(self, script_path: Path) -> None:
-        if script_path.exists():
+    def remove_script(self, script_path: Path) -> None:
+        description = self.read_script_description(script_path)
+        if description is None:
+            return
+        if not description.get("Linked", False) and script_path.exists():
             script_path.unlink()
+        description_path = self.get_script_description_path(script_path)
+        if description_path.exists():
+            description_path.unlink()
 
 
     def is_linked_component_valid(self, linked_record: LinkedComponentRecord) -> bool:
@@ -391,21 +482,157 @@ class Workspace:
 
     def get_script_description_path(self, script_path: Path) -> Path:
         self.script_descriptions_path.mkdir(parents=True, exist_ok=True)
+        resolved_script_path = script_path.expanduser().resolve()
+        for description_path in self.script_descriptions_path.glob("*.json"):
+            try:
+                description = _json_load(description_path)
+                described_path = Path(description["ScriptPath"]).expanduser().resolve()
+            except (KeyError, OSError, ValueError, json.JSONDecodeError):
+                continue
+            if described_path == resolved_script_path:
+                return description_path
         return self.script_descriptions_path / f"{script_path.stem}.json"
 
-    def read_script_description(self, script_path: Path) -> dict[str, list[str]]:
+    def get_linked_script_description_path(self, script_name: str) -> Path:
+        digest = hashlib.sha256(script_name.encode("utf-8")).hexdigest()[:12]
+        return self.script_descriptions_path / f"linked_{digest}.json"
+
+    def read_script_description(self, script_path: Path) -> dict[str, Any] | None:
         assignments_path = self.get_script_description_path(script_path)
         if assignments_path.exists():
             try:
                 payload = json.loads(assignments_path.read_text(encoding="utf-8"))
+                configurations = payload.get("Configurations")
+                active_configuration = payload.get("ActiveConfiguration")
+                if not isinstance(configurations, dict) or not configurations:
+                    raise ValueError(
+                        f"Script description '{assignments_path}' does not define configurations."
+                    )
+                if active_configuration not in configurations:
+                    raise ValueError(
+                        f"Active configuration '{active_configuration}' is not defined in "
+                        f"'{assignments_path}'."
+                    )
+                for name, configuration in configurations.items():
+                    if not isinstance(configuration, dict) or not isinstance(
+                        configuration.get("Components"), dict
+                    ):
+                        raise ValueError(
+                            f"Configuration '{name}' does not define Components."
+                        )
                 return payload
             except (json.JSONDecodeError, OSError):
                 pass
         return None
 
+    @staticmethod
+    def active_script_components(description: dict[str, Any]) -> dict[str, Any]:
+        active_configuration = description["ActiveConfiguration"]
+        return description["Configurations"][active_configuration]["Components"]
+
+    @staticmethod
+    def script_configuration_components(
+        description: dict[str, Any], configuration_name: str
+    ) -> dict[str, Any]:
+        try:
+            return description["Configurations"][configuration_name]["Components"]
+        except KeyError as exc:
+            raise ValueError(
+                f"Configuration '{configuration_name}' does not exist."
+            ) from exc
+
+    def create_script_configuration(
+        self,
+        script_h: ScriptHandle,
+        configuration_name: str,
+    ) -> None:
+        name = configuration_name.strip()
+        if not name:
+            raise ValueError("Configuration name cannot be empty.")
+        description = self.read_script_description(script_h.path)
+        configurations = description["Configurations"]
+        if name in configurations:
+            raise ValueError(f"Configuration '{name}' already exists.")
+
+        configurations[name] = {"Components": {}}
+        self._write_script_description_payload(description, script_h.path)
+
+    def duplicate_script_configuration(
+        self,
+        script_h: ScriptHandle,
+        source_configuration_name: str,
+        new_configuration_name: str,
+    ) -> None:
+        name = new_configuration_name.strip()
+        if not name:
+            raise ValueError("Configuration name cannot be empty.")
+        description = self.read_script_description(script_h.path)
+        configurations = description["Configurations"]
+        if name in configurations:
+            raise ValueError(f"Configuration '{name}' already exists.")
+
+        source_components = self.script_configuration_components(
+            description, source_configuration_name
+        )
+        configurations[name] = {
+            "Components": copy.deepcopy(source_components)
+        }
+        self._write_script_description_payload(description, script_h.path)
+
+    def rename_script_configuration(
+        self,
+        script_h: ScriptHandle,
+        configuration_name: str,
+        new_configuration_name: str,
+    ) -> None:
+        new_name = new_configuration_name.strip()
+        if not new_name:
+            raise ValueError("Configuration name cannot be empty.")
+        description = self.read_script_description(script_h.path)
+        configurations = description["Configurations"]
+        if configuration_name not in configurations:
+            raise ValueError(f"Configuration '{configuration_name}' does not exist.")
+        if new_name != configuration_name and new_name in configurations:
+            raise ValueError(f"Configuration '{new_name}' already exists.")
+        if new_name == configuration_name:
+            return
+
+        description["Configurations"] = {
+            new_name if name == configuration_name else name: configuration
+            for name, configuration in configurations.items()
+        }
+        if description["ActiveConfiguration"] == configuration_name:
+            description["ActiveConfiguration"] = new_name
+        self._write_script_description_payload(description, script_h.path)
+
+    def delete_script_configuration(
+        self, script_h: ScriptHandle, configuration_name: str
+    ) -> None:
+        description = self.read_script_description(script_h.path)
+        configurations = description["Configurations"]
+        if configuration_name not in configurations:
+            raise ValueError(f"Configuration '{configuration_name}' does not exist.")
+        if len(configurations) == 1:
+            raise ValueError("A script must have at least one configuration.")
+
+        del configurations[configuration_name]
+        if description["ActiveConfiguration"] == configuration_name:
+            description["ActiveConfiguration"] = next(iter(configurations))
+        self._write_script_description_payload(description, script_h.path)
+
+    def set_active_script_configuration(
+        self, script_h: ScriptHandle, configuration_name: str
+    ) -> None:
+        description = self.read_script_description(script_h.path)
+        if configuration_name not in description["Configurations"]:
+            raise ValueError(f"Configuration '{configuration_name}' does not exist.")
+        description["ActiveConfiguration"] = configuration_name
+        self._write_script_description_payload(description, script_h.path)
+
     def remove_component_from_script(self,
             script_h: ScriptHandle, component_id: str,
-            component_key: str | None = None) -> None:
+            component_key: str | None = None,
+            configuration_name: str | None = None) -> None:
         removed_id = component_id.strip()
         if not removed_id:
             raise ValueError("Component ID to remove cannot be empty.")
@@ -416,7 +643,10 @@ class Workspace:
             key = None
 
         description = self.read_script_description(script_h.path)
-        assignments = description.get("Components", {}) if description else {}
+        selected_configuration = configuration_name or description["ActiveConfiguration"]
+        assignments = self.script_configuration_components(
+            description, selected_configuration
+        )
         if key is not None:
             assignments[key] = [item for item in assignments[key] if item["Id"] != removed_id]
             if not assignments[key]:
@@ -428,7 +658,13 @@ class Workspace:
                 if not assignments[k]:
                     assignments.pop(k, None)
 
-        self.write_script_description(script_h.path, script_h.language, assignments, script_h.slots)
+        self.write_script_description(
+            script_h.path,
+            script_h.language,
+            assignments,
+            script_h.slots,
+            configuration_name=selected_configuration,
+        )
 
     def remove_component(self, record_id: str) -> None:
         component_record = self.get_part_record_by_id(record_id)
@@ -451,8 +687,14 @@ class Workspace:
                 + "because it is assigned to scripts or has subcomponents.")
 
         for script_h in self.list_scripts():
-            self.remove_component_from_script(script_h,
-                    component_id=component_record.id, component_key=None)
+            description = self.read_script_description(script_h.path)
+            for configuration_name in description["Configurations"]:
+                self.remove_component_from_script(
+                    script_h,
+                    component_id=component_record.id,
+                    component_key=None,
+                    configuration_name=configuration_name,
+                )
 
         for key, subcomponent in component_record.subcomponents.items():
             if not isinstance(subcomponent, list):
@@ -536,11 +778,34 @@ class Workspace:
     def write_script_description(self,
             script_path: Path, language: str,
             assignments: dict[str, list[str]],
-            spec: dict[str, str]) -> None:
+            spec: dict[str, str],
+            configuration_name: str | None = None) -> None:
+        existing = self.read_script_description(script_path)
+        if existing is None:
+            description = self.build_assignments_payload(
+                script_path,
+                language,
+                {DEFAULT_CONFIGURATION_NAME: {"Components": assignments}},
+                DEFAULT_CONFIGURATION_NAME,
+                spec,
+            ).to_dict()
+        else:
+            selected_configuration = configuration_name or existing["ActiveConfiguration"]
+            self.script_configuration_components(
+                existing, selected_configuration
+            )
+            existing["Configurations"][selected_configuration]["Components"] = assignments
+            existing["Language"] = language
+            existing["Spec"] = spec
+            description = existing
+        self._write_script_description_payload(description, script_path)
+
+    def _write_script_description_payload(
+        self, description: dict[str, Any], script_path: Path
+    ) -> None:
         assignments_path = self.get_script_description_path(script_path)
-        payload = self.build_assignments_payload(script_path, language, assignments, spec)
         assignments_path.write_text(
-            json.dumps(payload.to_dict(), indent=4, sort_keys=False),
+            json.dumps(description, indent=4, sort_keys=False),
             encoding="utf-8",
         )
 
@@ -550,7 +815,8 @@ class Workspace:
         return target
 
     def assign_component_to_script(self,
-            script_h: ScriptHandle, component_key: str, record_id: str) -> None:
+            script_h: ScriptHandle, component_key: str, record_id: str,
+            configuration_name: str | None = None) -> None:
         """
         Assign a component to a script by updating the COMPONENTS dict in the script file.
         Uses read_script_components and write_script_components helpers.
@@ -560,7 +826,10 @@ class Workspace:
 
         description = self.read_script_description(script_h.path)
         # Append to list for this key, or create new list
-        components = description.get("Components", {}) if description else {}
+        selected_configuration = configuration_name or description["ActiveConfiguration"]
+        components = self.script_configuration_components(
+            description, selected_configuration
+        )
         existing = components.get(component_key)
         record = self.get_part_record_by_id(record_id)
 
@@ -586,16 +855,24 @@ class Workspace:
                 components[component_key] = [existing]
         else:
             components[component_key] = [new_item]
-        self.write_script_description(script_h.path, script_h.language, components, script_h.slots)
+        self.write_script_description(
+            script_h.path,
+            script_h.language,
+            components,
+            script_h.slots,
+            configuration_name=selected_configuration,
+        )
 
     def build_assignments_payload(self,
             script_path: Path, language: str,
-            assignments: dict[str, list[str]],
+            configurations: dict[str, dict[str, Any]],
+            active_configuration: str,
             spec: dict[str, str]) -> ScriptDescription:
         return ScriptDescription(
             script_path=script_path,
             language=language,
-            components=assignments,
+            configurations=configurations,
+            active_configuration=active_configuration,
             spec=spec
         )
 

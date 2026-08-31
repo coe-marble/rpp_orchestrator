@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -48,8 +49,9 @@ def rpp_home() -> Generator[Path, None, None]:
         finally:
             rpp_plugin_registrator.plugin_type_registrator.reset_module()
             rp.RPP_HOME = original_rpp_home
+            rp.reset_module()
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def setup_plugins(rpp_home) -> Generator[LibraryManager, None, None]:
     yield setup_test_plugins(rpp_home)
 
@@ -68,7 +70,7 @@ def test_setup_registers_mock_plugins_for_available_plugins(setup_plugins: Libra
 
 
 def test_mock_script_components_are_plugin_types(setup_plugins: LibraryManager) -> None:
-    script_path = MOCK_WORKSPACE_POPULATED / "scripts" / "example.py"
+    script_path = MOCK_WORKSPACE_POPULATED / "example.py"
     spec = importlib.util.spec_from_file_location("mock_workspace_example", script_path)
     assert spec is not None
     assert spec.loader is not None
@@ -88,17 +90,45 @@ def test_write_components_roundtrip(tmp_path: Path) -> None:
     payload = {
         "ScriptPath": str(script_path),
         "Language": "python",
-        "Components": {
-            "planner": "rpp_testing::MotionPlanner",
-            "estimator": "rpp_testing::DisturbanceGenerator2D",
+        "Configurations": {
+            "Default": {
+                "Components": {
+                    "planner": "rpp_testing::MotionPlanner",
+                    "estimator": "rpp_testing::DisturbanceGenerator2D",
+                }
+            }
         },
-        "Spec": {}
+        "ActiveConfiguration": "Default",
+        "Spec": {},
+        "Linked": False,
+        "ScriptName": "demo_ws",
+        "ScriptLibrary": "demo_ws",
     }
 
-    workspace.write_script_description(script_path, "python", payload["Components"], {})
+    workspace.write_script_description(
+        script_path,
+        "python",
+        payload["Configurations"]["Default"]["Components"],
+        {},
+    )
     read_back = workspace.read_script_description(script_path)
 
     assert read_back == payload
+
+
+def test_components_only_script_description_is_rejected(tmp_path: Path) -> None:
+    workspace = create_workspace(tmp_path / "demo_ws", name="demo_ws")
+    script_path = workspace.root / "demo_ws.py"
+    description_path = workspace.get_script_description_path(script_path)
+    description_path.write_text(json.dumps({
+        "ScriptPath": str(script_path),
+        "Language": "python",
+        "Components": {},
+        "Spec": {},
+    }), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="does not define configurations"):
+        workspace.read_script_description(script_path)
 
 
 def test_create_workspace_layout_and_default_script(tmp_path: Path) -> None:
@@ -113,6 +143,59 @@ def test_create_workspace_layout_and_default_script(tmp_path: Path) -> None:
     assert workspace.logs_path.exists()
     assert script_path.exists()
     assert "COMPONENTS = {}" in script_path.read_text(encoding="utf-8")
+
+
+def test_linked_script_removal_preserves_external_source(tmp_path: Path) -> None:
+    workspace = create_workspace(tmp_path / "workspace", name="workspace")
+    external_script = tmp_path / "external_library" / "Scripts" / "controller.py"
+    external_script.parent.mkdir(parents=True)
+    external_script.write_text(
+        "class Controller:\n    COMPONENTS = {}\n", encoding="utf-8"
+    )
+
+    script = workspace.link_registered_script(
+        external_script,
+        "external_library::controller",
+        "external_library",
+        "python",
+    )
+    description = script.load_description()
+    assert description["Linked"] is True
+    assert description["ScriptName"] == "external_library::controller"
+
+    workspace.remove_script(script.path)
+
+    assert external_script.exists()
+    assert not workspace.get_script_description_path(script.path).exists()
+
+
+def test_same_named_scripts_from_different_libraries_have_distinct_bindings(
+        tmp_path: Path) -> None:
+    workspace = create_workspace(tmp_path / "workspace", name="workspace")
+    first_path = tmp_path / "first" / "Scripts" / "controller.py"
+    second_path = tmp_path / "second" / "Scripts" / "controller.py"
+    for script_path in (first_path, second_path):
+        script_path.parent.mkdir(parents=True)
+        script_path.write_text(
+            "class Controller:\n    COMPONENTS = {}\n", encoding="utf-8"
+        )
+
+    first = workspace.link_registered_script(
+        first_path, "first::controller", "first", "python"
+    )
+    second = workspace.link_registered_script(
+        second_path, "second::controller", "second", "python"
+    )
+
+    assert first.description_path != second.description_path
+    assert first.description_path.exists()
+    assert second.description_path.exists()
+    linked_names = {
+        script.load_description().get("ScriptName")
+        for script in workspace.list_scripts()
+        if script.load_description().get("Linked")
+    }
+    assert linked_names == {"first::controller", "second::controller"}
 
 
 def test_default_script_source_is_language_dependent() -> None:

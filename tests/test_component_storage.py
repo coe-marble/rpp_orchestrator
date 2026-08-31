@@ -28,6 +28,7 @@ def rpp_home() -> Generator[Path, None, None]:
             yield new_home
         finally:
             rp.RPP_HOME = original_rpp_home
+            rp.reset_module()
             rpp_plugin_registrator.plugin_type_registrator.reset_module()
 
 @pytest.fixture
@@ -40,7 +41,7 @@ def new_test_workspace(tmp_path: Path) -> Generator[Path, None, None]:
     workspace_root.mkdir(parents=True, exist_ok=True)
     yield workspace_root
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def setup_plugins(rpp_home) -> Generator[LibraryManager, None, None]:
     yield setup_test_plugins(rpp_home)
 

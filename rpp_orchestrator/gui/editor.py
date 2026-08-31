@@ -13,19 +13,20 @@ from typing import Any
 from uuid import uuid4
 
 from PyQt6.QtCore import QSignalBlocker, QTimer, Qt
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QAction, QColor
 from PyQt6.QtWidgets import (
     QDialog,
     QFileDialog,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
-    QListWidget,
-    QListWidgetItem,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QLineEdit,
+    QMenu,
     QStyle,
     QTreeWidget,
     QTreeWidgetItem,
@@ -34,6 +35,7 @@ from PyQt6.QtWidgets import (
 )
 from rpp_orchestrator.component_storage import LinkedComponentRecord, ComponentRecord
 from rpp_orchestrator.gui.new_script_dialog import NewScriptDialog
+from rpp_orchestrator.gui.link_script_dialog import LinkScriptDialog
 
 from rpp_plugin_registrator.library_manager import LibraryManager
 from rpp_py.context import ComponentContext
@@ -43,6 +45,7 @@ from ..vscode_debug_config_service import VscodeDebugConfigService
 from ..workspace import Workspace, default_script_source
 from rpp_plugin_registrator.plugin_type_registrator import get_plugin_types
 from ..script_handle import ScriptHandle
+from ..script_catalog import RegisteredScript, ScriptCatalog
 
 
 def _open_in_system_editor(path: Path) -> None:
@@ -107,21 +110,27 @@ class WorkspaceEditor(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.lib_manager = LibraryManager()
+        self.script_catalog = ScriptCatalog(self.lib_manager)
+        self.registered_scripts: list[RegisteredScript] = []
         self.vscode_debug_config_service = VscodeDebugConfigService()
         self.workspace: Workspace | None = None
         self.current_script_handle: ScriptHandle | None = None
+        self.current_configuration_name: str | None = None
         self.current_part_id: str = ""
         self.current_part_saved_name: str = ""
         self.current_part_source: str = ""
         self.current_part_node_path: tuple[object, ...] = ()
 
-        self.script_list = QListWidget(self)
-        self.script_list.currentItemChanged.connect(self._on_script_changed)
-        self.script_list.itemDoubleClicked.connect(self.open_selected_script)
-        self.script_list.setMinimumWidth(220)
-        self.script_list.setMaximumWidth(700)
+        self.script_tree = QTreeWidget(self)
+        self.script_tree.setHeaderLabels(["Scripts"])
+        self.script_tree.currentItemChanged.connect(self._on_script_changed)
+        self.script_tree.itemDoubleClicked.connect(self._on_script_double_clicked)
+        self.script_tree.setMinimumWidth(220)
+        self.script_tree.setMaximumWidth(700)
 
-        self.workspace_components_label = QLabel("Workspace Components", self)
+        self.configuration_components_label = QLabel(
+            "Configuration Components", self
+        )
         self.workspace_components_tree = QTreeWidget(self)
         self.workspace_components_tree.setHeaderLabels(["Component"])
         self.workspace_components_tree.setMinimumWidth(300)
@@ -208,19 +217,49 @@ class WorkspaceEditor(QWidget):
         self.debug_script_button.clicked.connect(self.debug_selected_script)
         self.debug_script_button.setEnabled(False)
 
-        self.new_script_button = QPushButton("New Script", self)
-        self.new_script_button.clicked.connect(self.create_script)
-        self.new_script_button.setEnabled(False)
+        self.add_script_button = QPushButton("Add Script", self)
+        self.add_script_button.setEnabled(False)
+        add_script_menu = QMenu(self.add_script_button)
+        create_script_action = QAction("Create New…", add_script_menu)
+        create_script_action.triggered.connect(self.create_script)
+        link_script_action = QAction("Link Registered…", add_script_menu)
+        link_script_action.triggered.connect(self.link_registered_script)
+        load_script_action = QAction("Load from File…", add_script_menu)
+        load_script_action.triggered.connect(self.load_script)
+        add_script_menu.addAction(create_script_action)
+        add_script_menu.addAction(link_script_action)
+        add_script_menu.addAction(load_script_action)
+        self.add_script_button.setMenu(add_script_menu)
 
-        self.load_script_button = QPushButton("Load Script", self)
-        self.load_script_button.clicked.connect(self.load_script)
-        self.load_script_button.setEnabled(False)
+        self.new_configuration_button = QPushButton("New", self)
+        self.new_configuration_button.clicked.connect(self.create_configuration)
+        self.new_configuration_button.setEnabled(False)
 
-        self.delete_script_button = QPushButton("Delete Script", self)
+        self.duplicate_configuration_button = QPushButton(
+            "Duplicate", self
+        )
+        self.duplicate_configuration_button.clicked.connect(
+            self.duplicate_selected_configuration
+        )
+        self.duplicate_configuration_button.setEnabled(False)
+
+        self.rename_configuration_button = QPushButton("Rename", self)
+        self.rename_configuration_button.clicked.connect(
+            self.rename_selected_configuration
+        )
+        self.rename_configuration_button.setEnabled(False)
+
+        self.delete_configuration_button = QPushButton("Delete", self)
+        self.delete_configuration_button.clicked.connect(
+            self.delete_selected_configuration
+        )
+        self.delete_configuration_button.setEnabled(False)
+
+        self.delete_script_button = QPushButton("Remove", self)
         self.delete_script_button.clicked.connect(self.delete_selected_script)
         self.delete_script_button.setEnabled(False)
 
-        self.refresh_scripts_button = QPushButton("Refresh Scripts", self)
+        self.refresh_scripts_button = QPushButton("Refresh", self)
         self.refresh_scripts_button.clicked.connect(self.refresh_scripts_view)
         self.refresh_scripts_button.setEnabled(False)
 
@@ -228,7 +267,10 @@ class WorkspaceEditor(QWidget):
         self.open_context_button.clicked.connect(self.open_workspace_context)
         self.open_context_button.setEnabled(False)
 
-        self.help_label = QLabel("Double-click a script to open it in your editor.", self)
+        self.help_label = QLabel(
+            "Double-click a script to open it; double-click a configuration to activate it.",
+            self,
+        )
         self.help_label.setObjectName("helpLabel")
 
         self.log_textbox = QPlainTextEdit(self)
@@ -239,23 +281,46 @@ class WorkspaceEditor(QWidget):
         script_actions_layout = QVBoxLayout(script_actions)
         script_actions_layout.setContentsMargins(0, 0, 0, 0)
         script_actions_layout.setSpacing(8)
+
+        self.configuration_actions = QGroupBox("Configurations", script_actions)
+        configuration_actions_layout = QHBoxLayout(self.configuration_actions)
+        configuration_actions_layout.setContentsMargins(0, 0, 0, 0)
+        configuration_actions_layout.setSpacing(6)
+        configuration_actions_layout.addWidget(self.new_configuration_button)
+        configuration_actions_layout.addWidget(self.duplicate_configuration_button)
+        configuration_actions_layout.addWidget(self.rename_configuration_button)
+        configuration_actions_layout.addWidget(self.delete_configuration_button)
+
+        self.script_management_actions = QGroupBox("Scripts", script_actions)
+        script_management_actions_layout = QHBoxLayout(self.script_management_actions)
+        script_management_actions_layout.setContentsMargins(0, 0, 0, 0)
+        script_management_actions_layout.setSpacing(6)
+        script_management_actions_layout.addWidget(self.add_script_button)
+        script_management_actions_layout.addWidget(self.refresh_scripts_button)
+        script_management_actions_layout.addWidget(self.delete_script_button)
+
         script_actions_layout.addWidget(self.help_label)
-        script_actions_layout.addWidget(self.new_script_button)
-        script_actions_layout.addWidget(self.load_script_button)
-        script_actions_layout.addWidget(self.refresh_scripts_button)
-        script_actions_layout.addWidget(self.delete_script_button)
-        script_actions_layout.addWidget(self.open_context_button)
-        script_actions_layout.addWidget(self.part_open_plugin_manager_button)
-        script_actions_layout.addWidget(self.part_refresh_plugins)
+        script_actions_layout.addWidget(self.script_management_actions)
+        script_actions_layout.addWidget(self.configuration_actions)
+        self.configuration_actions.setVisible(False)
+
+        workspace_actions = QWidget(self)
+        workspace_actions_layout = QVBoxLayout(workspace_actions)
+        workspace_actions_layout.setContentsMargins(0, 0, 0, 0)
+        workspace_actions_layout.setSpacing(8)
+        workspace_actions_layout.addWidget(self.open_context_button)
+        workspace_actions_layout.addWidget(self.part_open_plugin_manager_button)
+        workspace_actions_layout.addWidget(self.part_refresh_plugins)
 
         script_panel = QWidget(self)
         script_panel_layout = QVBoxLayout(script_panel)
         script_panel_layout.setContentsMargins(0, 0, 0, 0)
         script_panel_layout.setSpacing(8)
-        script_panel_layout.addWidget(self.script_list, 2)
-        script_panel_layout.addWidget(self.workspace_components_label)
+        script_panel_layout.addWidget(self.script_tree, 2)
+        script_panel_layout.addWidget(script_actions)
+        script_panel_layout.addWidget(self.configuration_components_label)
         script_panel_layout.addWidget(self.script_part_tree, 2)
-        script_panel_layout.addWidget(script_actions, 2)
+        script_panel_layout.addWidget(workspace_actions)
         script_panel.setMaximumWidth(500)
 
         part_details = QWidget(self)
@@ -341,12 +406,13 @@ class WorkspaceEditor(QWidget):
     def set_workspace(self, workspace: Workspace) -> None:
         self.workspace = workspace
         self.current_script_handle = None
-        self.new_script_button.setEnabled(True)
-        self.load_script_button.setEnabled(True)
+        self.current_configuration_name = None
+        self.add_script_button.setEnabled(True)
         self.refresh_scripts_button.setEnabled(True)
         self.delete_script_button.setEnabled(True)
         self.open_context_button.setEnabled(True)
         self.refresh_scripts()
+        self._refresh_registered_scripts()
         self._refresh_workspace_components_tree()
         self._refresh_parts_from_script(self.current_script_handle)
         self._reset_part_views()
@@ -354,31 +420,79 @@ class WorkspaceEditor(QWidget):
 
     def refresh_scripts_view(self) -> None:
         previous_script = self.current_script_handle
+        previous_configuration = self.current_configuration_name
         self.refresh_scripts()
 
         if previous_script is not None:
-            self._select_script_path(previous_script)
+            self._select_script_path(previous_script, previous_configuration)
 
-        current_item = self.script_list.currentItem()
+        current_item = self.script_tree.currentItem()
         if current_item is not None:
             self._on_script_changed(current_item, None)
         else:
             self.current_script_handle = None
+            self.current_configuration_name = None
             self._refresh_parts_from_script(self.current_script_handle)
             self._reset_part_views()
 
         self._refresh_workspace_components_tree()
+        self._refresh_registered_scripts()
+
+    def _refresh_registered_scripts(self) -> None:
+        if self.workspace is None:
+            self.registered_scripts = []
+            return
+
+        current_library = None
+        workspace_root = getattr(self.workspace, "root", None)
+        if workspace_root is not None:
+            try:
+                library_info = self.lib_manager.get_library_info(
+                    workspace_root, only_registered=False
+                )
+                current_library = library_info["Library"]
+            except (KeyError, OSError, TypeError, ValueError):
+                current_library = Path(workspace_root).name
+
+        self.registered_scripts = self.script_catalog.list_registered_scripts(
+            exclude_library=current_library,
+            workspace=self.workspace,
+        )
 
     def refresh_scripts(self) -> None:
-        self.script_list.clear()
+        self.script_tree.clear()
         if self.workspace is None:
             return
         for script_h in self.workspace.list_scripts():
             script_path = script_h.path
             self.workspace.ensure_script_assignments(script_path)
-            item = QListWidgetItem(script_path.name)
-            item.setData(Qt.ItemDataRole.UserRole, str(script_path))
-            self.script_list.addItem(item)
+            description = script_h.load_description()
+            script_label = script_path.name
+            if description.get("Linked") and description.get("ScriptLibrary"):
+                script_label = (
+                    f"{description.get('ScriptName', script_path.stem).split('::')[-1]} "
+                    f"[{description['ScriptLibrary']}]"
+                )
+            script_item = QTreeWidgetItem([script_label])
+            script_item.setData(0, Qt.ItemDataRole.UserRole, {
+                "kind": "script",
+                "script_path": str(script_path),
+            })
+            self.script_tree.addTopLevelItem(script_item)
+            active_configuration = description["ActiveConfiguration"]
+            for configuration_name in description["Configurations"]:
+                configuration_item = QTreeWidgetItem([configuration_name])
+                configuration_item.setData(0, Qt.ItemDataRole.UserRole, {
+                    "kind": "configuration",
+                    "script_path": str(script_path),
+                    "configuration_name": configuration_name,
+                })
+                if configuration_name == active_configuration:
+                    configuration_item.setBackground(
+                        0, self.COMPONENT_COLORS["linked_component_ok"]
+                    )
+                script_item.addChild(configuration_item)
+            script_item.setExpanded(True)
 
     def _refresh_workspace_components_tree(self) -> None:
         self.workspace_components_tree.clear()
@@ -408,16 +522,27 @@ class WorkspaceEditor(QWidget):
                 self._add_part_record_item(category, record, category_item)
             category_item.setExpanded(True)
 
-    def _on_script_changed(self, current: QListWidgetItem | None, previous: QListWidgetItem | None) -> None:
+    def _on_script_changed(
+        self, current: QTreeWidgetItem | None, previous: QTreeWidgetItem | None
+    ) -> None:
         del previous
         if self.workspace is None or current is None:
             self.current_script_handle = None
+            self.current_configuration_name = None
             self._update_script_management_buttons()
             return
 
-        script_path = Path(current.data(Qt.ItemDataRole.UserRole))
+        payload = current.data(0, Qt.ItemDataRole.UserRole)
+        if not isinstance(payload, dict):
+            return
+        script_path = Path(payload["script_path"])
         script_handle = ScriptHandle(script_path, self.workspace)
         self.current_script_handle = script_handle
+        if payload["kind"] == "configuration":
+            self.current_configuration_name = payload["configuration_name"]
+        else:
+            description = script_handle.load_description()
+            self.current_configuration_name = description["ActiveConfiguration"]
         self._refresh_parts_from_script(script_handle)
         self._update_script_management_buttons()
 
@@ -434,7 +559,10 @@ class WorkspaceEditor(QWidget):
         assignments = script_handle.load_description()
 
         records_by_id = self.workspace.part_records
-        for component_key, items in assignments["Components"].items():
+        selected_components = self.workspace.script_configuration_components(
+            assignments, self.current_configuration_name
+        )
+        for component_key, items in selected_components.items():
             assigned_records = []
             if not isinstance(items, list):
                 items = [items]
@@ -561,7 +689,7 @@ class WorkspaceEditor(QWidget):
 
 
         for key, value in subcomponents.items():
-            if value is None or len(value) == 0:
+            if value is None:
                 continue
             spec_item = specs.get(key)
             assert spec_item is not None, f"Spec item for key '{key}' not found."
@@ -827,7 +955,7 @@ class WorkspaceEditor(QWidget):
             context = item.data(0, Qt.ItemDataRole.UserRole)
             if isinstance(context, dict) \
                     and context.get("script_slot") is True:
-                info = context.get("type_info", {})
+                info = context.get("type_info") or {}
                 return (context.get("slot_name", ""), \
                         info.get("PluginTypeName", ""))
             item = item.parent()
@@ -1046,7 +1174,18 @@ class WorkspaceEditor(QWidget):
 
     def _update_script_management_buttons(self) -> None:
         has_script = self.current_script_handle is not None
+        current_item = self.script_tree.currentItem()
+        payload = current_item.data(0, Qt.ItemDataRole.UserRole) \
+            if current_item is not None else None
+        has_selected_configuration = isinstance(payload, dict) \
+            and payload.get("kind") == "configuration"
+        self.script_management_actions.setVisible(not has_selected_configuration)
+        self.configuration_actions.setVisible(has_selected_configuration)
         self.debug_script_button.setEnabled(has_script)
+        self.new_configuration_button.setEnabled(has_script)
+        self.duplicate_configuration_button.setEnabled(has_selected_configuration)
+        self.rename_configuration_button.setEnabled(has_selected_configuration)
+        self.delete_configuration_button.setEnabled(has_selected_configuration)
 
     def debug_selected_script(self) -> None:
         if self.current_script_handle is None:
@@ -1156,7 +1295,11 @@ class WorkspaceEditor(QWidget):
         if component_key is None:
             component_key, _ = self._selected_script_component_kv()
         self.workspace.assign_component_to_script(
-            self.current_script_handle, component_key, record.id)
+            self.current_script_handle,
+            component_key,
+            record.id,
+            configuration_name=self.current_configuration_name,
+        )
         if log_info:
             self.log_message(
                 f"Assigned component {record.name} to script slot {component_key}")
@@ -1241,10 +1384,27 @@ class WorkspaceEditor(QWidget):
         self._reselect_workspace_part_node(path + (record.id,))
 
     def remove_selected_component(self) -> None:
-
-        current_part_folder = self.workspace.get_component(self.current_part_id).folder
-        if current_part_folder is None:
+        if self.workspace is None:
             return
+
+        if self.current_part_source == "script":
+            selected_item = self.script_part_tree.currentItem()
+        elif self.current_part_source == "workspace":
+            selected_item = self.workspace_components_tree.currentItem()
+        else:
+            selected_item = None
+        payload = selected_item.data(0, Qt.ItemDataRole.UserRole) \
+            if selected_item is not None else None
+        record = payload.get("record") if isinstance(payload, dict) else None
+        if record is None:
+            QMessageBox.warning(
+                self, "Remove Component", "Select an assigned component first."
+            )
+            return
+
+        component_id = str(record.id)
+        current_part_folder = record.folder
+        node_path = self._get_node_path_for_current_part()
 
         if QMessageBox.question(
             self, "Remove Component",
@@ -1256,9 +1416,13 @@ class WorkspaceEditor(QWidget):
                     and self.current_script_handle is not None:
                 component_key, _ = self._selected_script_component_kv()
                 self.workspace.remove_component_from_script(
-                    self.current_script_handle, self.current_part_id, component_key)
+                    self.current_script_handle,
+                    component_id,
+                    component_key,
+                    configuration_name=self.current_configuration_name,
+                )
             elif self.current_part_source == "workspace":
-                self.workspace.remove_component(self.current_part_id)
+                self.workspace.remove_component(component_id)
             else:
                 QMessageBox.warning(self,
                     "Remove Component",
@@ -1272,9 +1436,8 @@ class WorkspaceEditor(QWidget):
 
         self._refresh_current_script_parts()
         self._reset_part_views()
-        path = self._get_node_path_for_current_part()
         self._refresh_workspace_components_tree()
-        self._reselect_workspace_part_node(path[:-1])
+        self._reselect_workspace_part_node(node_path[:-1])
 
 
     def duplicate_selected_component(self) -> None:
@@ -1307,16 +1470,44 @@ class WorkspaceEditor(QWidget):
             self._refresh_parts_from_script(self.current_script_handle)
 
 
-    def open_selected_script(self, item: QListWidgetItem | None = None) -> None:
+    def _on_script_double_clicked(
+        self, item: QTreeWidgetItem, column: int
+    ) -> None:
+        del column
+        payload = item.data(0, Qt.ItemDataRole.UserRole)
+        if not isinstance(payload, dict):
+            return
+        if payload.get("kind") == "script":
+            self.open_selected_script(item)
+            return
+        if payload.get("kind") != "configuration" or self.workspace is None:
+            return
+
+        script_handle = ScriptHandle(Path(payload["script_path"]), self.workspace)
+        configuration_name = payload["configuration_name"]
+        self.workspace.set_active_script_configuration(
+            script_handle, configuration_name
+        )
+        self.current_script_handle = script_handle
+        self.current_configuration_name = configuration_name
+        self.refresh_scripts_view()
+        self.log_message(
+            f"Activated configuration {configuration_name} for {script_handle.path.name}"
+        )
+
+    def open_selected_script(self, item: QTreeWidgetItem | None = None) -> None:
         if self.workspace is None:
             return
 
         if item is None:
-            item = self.script_list.currentItem()
+            item = self.script_tree.currentItem()
             if item is None:
                 return
 
-        script_path = Path(item.data(Qt.ItemDataRole.UserRole))
+        payload = item.data(0, Qt.ItemDataRole.UserRole)
+        if not isinstance(payload, dict):
+            return
+        script_path = Path(payload["script_path"])
         try:
             _open_in_system_editor(script_path)
         except Exception as exc:
@@ -1335,7 +1526,7 @@ class WorkspaceEditor(QWidget):
             script_path, default_script_source(script_path))
         self.refresh_scripts()
         self._select_script_path(script_handle)
-        self.open_selected_script(self.script_list.currentItem())
+        self.open_selected_script(self.script_tree.currentItem())
 
     def load_script(self) -> None:
         script_path, _ = QFileDialog.getOpenFileName(
@@ -1345,20 +1536,185 @@ class WorkspaceEditor(QWidget):
         script_handle = self.workspace.load_script(Path(script_path))
         self.refresh_scripts()
         self._select_script_path(script_handle)
-        self.open_selected_script(self.script_list.currentItem())
+        self.open_selected_script(self.script_tree.currentItem())
+
+    def link_registered_script(self) -> None:
+        if self.workspace is None:
+            return
+        self._refresh_registered_scripts()
+        if not self.registered_scripts:
+            QMessageBox.information(
+                self,
+                "Link Registered Script",
+                "No scripts were found in other registered libraries.",
+            )
+            return
+
+        dialog = LinkScriptDialog(self.registered_scripts, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        script = dialog.selected_script
+        if script is None:
+            return
+        try:
+            script_handle = self.workspace.link_registered_script(
+                script.path,
+                script.script_name,
+                script.library,
+                script.language,
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            QMessageBox.warning(self, "Link Registered Script", str(exc))
+            return
+
+        self.refresh_scripts()
+        self._select_script_path(script_handle)
+        self.log_message(f"Linked registered script {script.script_name}")
+
+    def create_configuration(self) -> None:
+        if self.workspace is None or self.current_script_handle is None:
+            return
+        script_handle = self.current_script_handle
+        name, accepted = QInputDialog.getText(
+            self, "New Configuration", "Configuration name:"
+        )
+        if not accepted:
+            return
+        try:
+            self.workspace.create_script_configuration(
+                script_handle, name
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "New Configuration", str(exc))
+            return
+
+        configuration_name = name.strip()
+        self.refresh_scripts()
+        self._select_script_path(
+            script_handle, configuration_name
+        )
+        self.log_message(f"Created configuration {configuration_name}")
+
+    def duplicate_selected_configuration(self) -> None:
+        if self.workspace is None or self.current_script_handle is None:
+            return
+        script_handle = self.current_script_handle
+        item = self.script_tree.currentItem()
+        payload = item.data(0, Qt.ItemDataRole.UserRole) if item is not None else None
+        if not isinstance(payload, dict) or payload.get("kind") != "configuration":
+            return
+
+        source_name = payload["configuration_name"]
+        new_name, accepted = QInputDialog.getText(
+            self, "Duplicate Configuration", "New configuration name:"
+        )
+        if not accepted:
+            return
+        try:
+            self.workspace.duplicate_script_configuration(
+                script_handle, source_name, new_name
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Duplicate Configuration", str(exc))
+            return
+
+        configuration_name = new_name.strip()
+        self.refresh_scripts()
+        self._select_script_path(
+            script_handle, configuration_name
+        )
+        self.log_message(
+            f"Duplicated configuration {source_name} as {configuration_name}"
+        )
+
+    def rename_selected_configuration(self) -> None:
+        if self.workspace is None or self.current_script_handle is None:
+            return
+        script_handle = self.current_script_handle
+        item = self.script_tree.currentItem()
+        payload = item.data(0, Qt.ItemDataRole.UserRole) if item is not None else None
+        if not isinstance(payload, dict) or payload.get("kind") != "configuration":
+            return
+
+        configuration_name = payload["configuration_name"]
+        new_name, accepted = QInputDialog.getText(
+            self,
+            "Rename Configuration",
+            "Configuration name:",
+            QLineEdit.EchoMode.Normal,
+            configuration_name,
+        )
+        if not accepted:
+            return
+        try:
+            self.workspace.rename_script_configuration(
+                script_handle, configuration_name, new_name
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Rename Configuration", str(exc))
+            return
+
+        renamed_configuration = new_name.strip()
+        self.refresh_scripts()
+        self._select_script_path(script_handle, renamed_configuration)
+        self.log_message(
+            f"Renamed configuration {configuration_name} to {renamed_configuration}"
+        )
+
+    def delete_selected_configuration(self) -> None:
+        if self.workspace is None or self.current_script_handle is None:
+            return
+        script_handle = self.current_script_handle
+        item = self.script_tree.currentItem()
+        payload = item.data(0, Qt.ItemDataRole.UserRole) if item is not None else None
+        if not isinstance(payload, dict) or payload.get("kind") != "configuration":
+            return
+
+        configuration_name = payload["configuration_name"]
+        if QMessageBox.question(
+            self,
+            "Delete Configuration",
+            f"Delete configuration '{configuration_name}'?",
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self.workspace.delete_script_configuration(
+                script_handle, configuration_name
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Delete Configuration", str(exc))
+            return
+
+        description = script_handle.load_description()
+        active_configuration = description["ActiveConfiguration"]
+        self.refresh_scripts()
+        self._select_script_path(
+            script_handle, active_configuration
+        )
+        self.log_message(f"Deleted configuration {configuration_name}")
 
     def delete_selected_script(self) -> None:
         if self.workspace is None:
             return
-        item = self.script_list.currentItem()
+        item = self.script_tree.currentItem()
         if item is None:
             return
-        script_path = Path(item.data(Qt.ItemDataRole.UserRole))
+        payload = item.data(0, Qt.ItemDataRole.UserRole)
+        if not isinstance(payload, dict):
+            return
+        script_path = Path(payload["script_path"])
+        description = self.workspace.read_script_description(script_path)
+        if description.get("Linked", False):
+            confirmation = f"Remove {script_path.name} from this workspace?"
+        else:
+            confirmation = (
+                f"Delete {script_path.name} and remove it from this workspace?"
+            )
         if QMessageBox.question(self,
-            "Delete script", f"Delete {script_path.name}?") \
+            "Remove Script", confirmation) \
                 != QMessageBox.StandardButton.Yes:
             return
-        self.workspace.delete_script(script_path)
+        self.workspace.remove_script(script_path)
         self.refresh_scripts()
 
     def open_workspace_context(self) -> None:
@@ -1369,13 +1725,24 @@ class WorkspaceEditor(QWidget):
         except Exception as exc:
             QMessageBox.critical(self, "Open context failed", str(exc))
 
-    def _select_script_path(self, script_handle: ScriptHandle) -> None:
+    def _select_script_path(
+        self, script_handle: ScriptHandle, configuration_name: str | None = None
+    ) -> None:
         self.current_script_handle = script_handle
-        for index in range(self.script_list.count()):
-            item = self.script_list.item(index)
-            if Path(item.data(Qt.ItemDataRole.UserRole)) == script_handle.path:
-                self.script_list.setCurrentItem(item)
+        for index in range(self.script_tree.topLevelItemCount()):
+            script_item = self.script_tree.topLevelItem(index)
+            payload = script_item.data(0, Qt.ItemDataRole.UserRole)
+            if Path(payload["script_path"]) != script_handle.path:
+                continue
+            if configuration_name is None:
+                self.script_tree.setCurrentItem(script_item)
                 return
+            for child_index in range(script_item.childCount()):
+                child = script_item.child(child_index)
+                child_payload = child.data(0, Qt.ItemDataRole.UserRole)
+                if child_payload["configuration_name"] == configuration_name:
+                    self.script_tree.setCurrentItem(child)
+                    return
 
 
     def get_plugin_type_info(self, plugin_name: str) \
@@ -1403,4 +1770,3 @@ class WorkspaceEditor(QWidget):
         self._load_plugin_types()
         self._load_plugins()
         self.log_message("Plugin types and available plugins refreshed.")
-

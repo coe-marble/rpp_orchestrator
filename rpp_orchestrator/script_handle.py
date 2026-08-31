@@ -48,7 +48,8 @@ def language_spec(language: str) -> ScriptLanguageSpec:
 
 
 class ScriptHandle:
-    def __init__(self, path: Path, ws: 'Workspace', language: str | None = None) -> None:
+    def __init__(self, path: Path, ws: 'Workspace', language: str | None = None,
+            description_path: Path | None = None) -> None:
 
         self.path = path
         if language is None:
@@ -58,9 +59,10 @@ class ScriptHandle:
         self.script_name = path.stem
 
         self.slots = self._get_script_slots()
-        self.description_path = self.ws.get_script_description_path(self.path)
+        self.description_path = description_path \
+            or self.ws.get_script_description_path(self.path)
         if not self.description_path.exists():
-            self.ws.write_script_description(self.path, self.language, {})
+            self.ws.write_script_description(self.path, self.language, {}, self.slots)
 
     def add_component_slot(self, slot_name: str, plugin_type: str) -> None:
         self.slots[slot_name] = plugin_type
@@ -77,19 +79,21 @@ class ScriptHandle:
         """Add a component slot to the script's COMPONENTS dict."""
         description = self.ws.read_script_description(self.path)
         record = self.ws.get_part_record_by_id(record_id)
-        description["Components"][slot_name] = {"PluginType": record.plugin_type, "Components": []}
-        self.ws.write_script_description(self.path, description)
+        components = self.ws.active_script_components(description)
+        components[slot_name] = {"PluginType": record.plugin_type, "Components": []}
+        self.ws.write_script_description(self.path, self.language, components, self.slots)
 
     def remove_component_from_slot(self, slot_name: str) -> None:
         """Remove a component slot from the script's COMPONENTS dict."""
         description = self.ws.read_script_description(self.path)
-        if slot_name not in description["Components"]:
+        components = self.ws.active_script_components(description)
+        if slot_name not in components:
             raise ValueError(f"Component slot '{slot_name}' does not exist in script.")
-        del description["Components"][slot_name]
-        self.ws.write_script_description(self.path, description)
+        del components[slot_name]
+        self.ws.write_script_description(self.path, self.language, components, self.slots)
 
 
-    def load_description(self) -> dict[str, list[str]]:
+    def load_description(self) -> dict[str, Any]:
         return self.ws.read_script_description(self.path)
 
     def _load_class_python(self) -> Any:

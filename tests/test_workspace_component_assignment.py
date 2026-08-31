@@ -21,6 +21,7 @@ def temp_workspace(tmp_path):
     home = tmp_path / "home"
     home.mkdir(parents=True, exist_ok=True)
     import rpp_plugin_registrator.registry_config as rp
+    original_rpp_home = rp.RPP_HOME
     rp.RPP_HOME = home
 
     import rpp_plugin_registrator.plugin_type_registrator
@@ -33,6 +34,8 @@ def temp_workspace(tmp_path):
     test_plugin_file.write_text(test_plugin_src, encoding="utf-8")
     ws.lib_manager.register_plugin_from_source(test_plugin_file, "testlib")
     yield ws
+    rp.RPP_HOME = original_rpp_home
+    rp.reset_module()
     rpp_plugin_registrator.plugin_type_registrator.reset_module()
     shutil.rmtree(ws_path, ignore_errors=True)
 
@@ -116,8 +119,97 @@ def test_add_component_and_assign_to_script(temp_workspace : Workspace):
     # Should appear in both workspace and script assignments
     assert record.folder.exists()
     description = ws.read_script_description(script.path)
-    ids = [x["Id"] for x in description["Components"]["ctl_main"]]
-    assert "ctl_main" in description["Components"] and record.id in ids
+    components = ws.active_script_components(description)
+    ids = [x["Id"] for x in components["ctl_main"]]
+    assert "ctl_main" in components and record.id in ids
+
+
+def test_configurations_have_independent_component_assignments(
+        temp_workspace: Workspace):
+    ws = temp_workspace
+    script = ws.create_script("configured")
+    script.add_component_slot("ctl_main", "rpp_testing::MotionController2D")
+    default_record = ws.create_component("Controller1", "testlib::TestPlugin")
+    alternative_record = ws.create_component("Controller2", "testlib::TestPlugin")
+
+    ws.assign_component_to_script(script, "ctl_main", default_record.id)
+    ws.create_script_configuration(script, "Alternative")
+    ws.assign_component_to_script(
+        script,
+        "ctl_main",
+        alternative_record.id,
+        configuration_name="Alternative",
+    )
+
+    description = ws.read_script_description(script.path)
+    default_components = ws.script_configuration_components(description, "Default")
+    alternative_components = ws.script_configuration_components(
+        description, "Alternative"
+    )
+    assert [item["Id"] for item in default_components["ctl_main"]] == [
+        default_record.id
+    ]
+    assert [item["Id"] for item in alternative_components["ctl_main"]] == [
+        alternative_record.id
+    ]
+
+
+def test_configuration_crud_and_activation(temp_workspace: Workspace):
+    ws = temp_workspace
+    script = ws.create_script("configured")
+
+    ws.create_script_configuration(script, "Alternative")
+    ws.set_active_script_configuration(script, "Alternative")
+    description = ws.read_script_description(script.path)
+    assert description["ActiveConfiguration"] == "Alternative"
+
+    ws.delete_script_configuration(script, "Alternative")
+    description = ws.read_script_description(script.path)
+    assert set(description["Configurations"]) == {"Default"}
+    assert description["ActiveConfiguration"] == "Default"
+
+    with pytest.raises(ValueError, match="at least one configuration"):
+        ws.delete_script_configuration(script, "Default")
+
+
+def test_rename_configuration_preserves_assignments_and_activation(
+        temp_workspace: Workspace):
+    ws = temp_workspace
+    script = ws.create_script("configured")
+    script.add_component_slot("ctl_main", "rpp_testing::MotionController2D")
+    record = ws.create_component("Controller1", "testlib::TestPlugin")
+    ws.assign_component_to_script(script, "ctl_main", record.id)
+
+    ws.rename_script_configuration(script, "Default", "Primary")
+
+    description = ws.read_script_description(script.path)
+    assert set(description["Configurations"]) == {"Primary"}
+    assert description["ActiveConfiguration"] == "Primary"
+    components = ws.script_configuration_components(description, "Primary")
+    assert [item["Id"] for item in components["ctl_main"]] == [record.id]
+
+
+def test_duplicate_configuration_copies_independent_assignments(
+        temp_workspace: Workspace):
+    ws = temp_workspace
+    script = ws.create_script("configured")
+    script.add_component_slot("ctl_main", "rpp_testing::MotionController2D")
+    record = ws.create_component("Controller1", "testlib::TestPlugin")
+    ws.assign_component_to_script(script, "ctl_main", record.id)
+
+    ws.duplicate_script_configuration(script, "Default", "Copy")
+    description = ws.read_script_description(script.path)
+    copied = ws.script_configuration_components(description, "Copy")
+    assert [item["Id"] for item in copied["ctl_main"]] == [record.id]
+
+    ws.remove_component_from_script(
+        script, record.id, "ctl_main", configuration_name="Copy"
+    )
+
+    description = ws.read_script_description(script.path)
+    default_components = ws.script_configuration_components(description, "Default")
+    assert [item["Id"] for item in default_components["ctl_main"]] == [record.id]
+    assert "ctl_main" not in ws.script_configuration_components(description, "Copy")
 
 def test_add_component_and_assign_to_script_with_wrong_plugin_type(temp_workspace : Workspace):
     ws = temp_workspace
@@ -155,21 +247,23 @@ def test_remove_component_from_script(temp_workspace):
 
     assert record.folder.exists()
     description = ws.read_script_description(script.path)
-    ids = [x["Id"] for x in description["Components"]["ctl_main"]]
-    assert "ctl_main" in description["Components"] and record.id in ids
+    components = ws.active_script_components(description)
+    ids = [x["Id"] for x in components["ctl_main"]]
+    assert "ctl_main" in components and record.id in ids
 
     # Now remove the component from the script
     ws.remove_component_from_script(script, record.id, "ctl_main")
     description = ws.read_script_description(script.path)
-    assert "ctl_main" not in description["Components"]
+    assert "ctl_main" not in ws.active_script_components(description)
     assert record.folder.exists()  # The component folder should still exist in the workspace
     assert ws.get_part_record_by_id(record.id) is not None  # The record should still exist in the workspace
+
 
     ws.assign_component_to_script(script, "ctl_main", record.id)
     # Now remove the component from all script keys
     ws.remove_component_from_script(script, record.id)
 
-    assert "ctl_main" not in description["Components"]
+    description = ws.read_script_description(script.path)
+    assert "ctl_main" not in ws.active_script_components(description)
     assert record.folder.exists()  # The component folder should still exist in the workspace
     assert ws.get_part_record_by_id(record.id) is not None  # The record should still exist in the workspace
-
