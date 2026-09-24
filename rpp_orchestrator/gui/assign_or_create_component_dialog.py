@@ -197,7 +197,7 @@ class AssignOrCreateComponentDialog(QDialog):
 
         if self.add_button is not None:
             self.add_button.setEnabled(
-                self._current_entry() is not (None, None))
+                self._current_entry() != (None, None))
 
     def _accept_current_selection(self, source: str) -> None:
         entry_src, entry = self._current_entry()

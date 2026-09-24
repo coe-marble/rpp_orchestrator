@@ -128,11 +128,11 @@ class ComponentRecord:
         if self.subcomponents is not None:
             for key, sub in self.subcomponents.items():
                 if isinstance(sub, list):
-                    parsed_subcomponents = {key: [s.to_dict() for s in sub] \
-                        for key, sub in self.subcomponents.items()}
+                    parsed_subcomponents[key] = [
+                        child.to_dict() for child in sub
+                    ]
                 else:
-                    parsed_subcomponents = {key: sub.to_dict() \
-                        for key, sub in self.subcomponents.items()}
+                    parsed_subcomponents[key] = sub.to_dict()
         return {
             "Id": self.id,
             "Name": self.name,
@@ -282,8 +282,10 @@ def _python_as_string(value: dict[str, Any] | None, indent = "") -> str:
         return f'"{value["default_value"]}"'
     new_indent = indent + "    "
     if value_type == "array":
+        elements = value.get("elements", value.get("default_value", []))
         return "[\n" + ",\n".join(
-            f"{new_indent}{_python_as_string(item, new_indent)}" for item in value.get("elements", [])
+            f"{new_indent}{_python_as_string(item, new_indent)}"
+            for item in elements
         ) + f"\n{indent}]"
     if value_type == "object":
         return "{\n" + ",\n".join(

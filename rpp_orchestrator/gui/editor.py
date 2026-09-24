@@ -580,8 +580,9 @@ class WorkspaceEditor(QWidget):
         self.script_part_tree.addTopLevelItem(components_item)
 
         for key, value in components.items():
+            plugin_type_name, _ = ComponentContext.parse_component_slot_type(value)
             try:
-                type_info = self.get_plugin_type_info(value)
+                type_info = self.get_plugin_type_info(plugin_type_name)
             except Exception:
                 self.log_textbox.appendPlainText(f"Warning: Could not load plugin info for {value}.")
                 continue
@@ -634,6 +635,7 @@ class WorkspaceEditor(QWidget):
                 "node_path": (category, record.id),
                 "record": record,
                 "id": str(record.id),
+                "show_plugin_name": True,
             },
         )
 
@@ -689,7 +691,7 @@ class WorkspaceEditor(QWidget):
 
 
         for key, value in subcomponents.items():
-            if value is None:
+            if not value:
                 continue
             spec_item = specs.get(key)
             assert spec_item is not None, f"Spec item for key '{key}' not found."
@@ -1017,18 +1019,8 @@ class WorkspaceEditor(QWidget):
                 "Save description", "Name cannot be empty.")
             return
 
-        # Create a new record with the updated name
-        updated_record = ComponentRecord(
-            id=record.id,
-            name=new_name,
-            plugin_type=record.plugin_type,
-            plugin_name=record.plugin_name,
-            library=record.library,
-            subcomponent_spec=record.subcomponent_spec,
-            folder=record.folder,
-        )
-        self.workspace.write_part_descriptor(
-            updated_record.folder, updated_record)
+        record.name = new_name
+        self.workspace.write_part_descriptor(record.folder, record)
         self.current_part_saved_name = new_name
         self.log_message(f"Saved description.json for {new_name}")
         changed = self._update_active_component_name(
@@ -1037,6 +1029,7 @@ class WorkspaceEditor(QWidget):
             self._refresh_part_title(new_name, is_dirty=False)
 
         path = self._get_node_path_for_current_part()
+        self._refresh_workspace_components_tree()
         self._refresh_current_script_parts()
         self._reselect_workspace_part_node(path)
 
@@ -1066,6 +1059,11 @@ class WorkspaceEditor(QWidget):
             context = item.data(0, Qt.ItemDataRole.UserRole)
             if isinstance(context, dict):
                 label = f"{new_name} *" if dirty else new_name
+                record = context.get("record")
+                if context.get("show_plugin_name") and isinstance(
+                    record, ComponentRecord
+                ):
+                    label = f"{label} ({record.plugin_name})"
                 item.setText(0, label)
                 context["name"] = new_name
                 item.setData(0, Qt.ItemDataRole.UserRole, context)
@@ -1105,9 +1103,9 @@ class WorkspaceEditor(QWidget):
 
     def _allows_name_editing(self, item: QTreeWidgetItem) -> bool:
         context = item.data(0, Qt.ItemDataRole.UserRole)
-        if "descriptor_path" in context:
-            return True
-        return False
+        return isinstance(context, dict) and isinstance(
+            context.get("record"), ComponentRecord
+        )
 
 
     def _refresh_part_title(self, stripped_name: str, is_dirty: bool) -> None:
@@ -1149,9 +1147,22 @@ class WorkspaceEditor(QWidget):
             if item is not None:
                 self.workspace_components_tree.setCurrentItem(item)
                 item.setExpanded(True)
+                self.workspace_components_tree.setFocus()
                 self.workspace_components_tree.itemClicked.emit(item, 0)
                 self.current_part_node_path = node_path
                 break
+
+    def _reselect_workspace_component(self, component_id: str) -> None:
+        item = self._search_tree_for_part_id_recursive(
+            self.workspace_components_tree, component_id
+        )
+        if item is None:
+            return
+
+        self.workspace_components_tree.setCurrentItem(item)
+        item.setExpanded(True)
+        self.workspace_components_tree.setFocus()
+        self.workspace_components_tree.itemClicked.emit(item, 0)
 
     def _reset_part_views(self, clear_tree: bool = False) -> None:
         self.current_part_id = None
@@ -1379,9 +1390,8 @@ class WorkspaceEditor(QWidget):
 
         self.log_message(f"Created component {component_name} at {record.folder}")
         self._refresh_current_script_parts()
-        path = self._get_node_path_for_current_part()
         self._refresh_workspace_components_tree()
-        self._reselect_workspace_part_node(path + (record.id,))
+        self._reselect_workspace_component(record.id)
 
     def remove_selected_component(self) -> None:
         if self.workspace is None:
@@ -1405,6 +1415,14 @@ class WorkspaceEditor(QWidget):
         component_id = str(record.id)
         current_part_folder = record.folder
         node_path = self._get_node_path_for_current_part()
+        parent_component_info = getattr(
+            record, "parent_component_info", None
+        )
+        parent_component_id = (
+            str(parent_component_info.id)
+            if parent_component_info is not None
+            else None
+        )
 
         if QMessageBox.question(
             self, "Remove Component",
@@ -1437,7 +1455,10 @@ class WorkspaceEditor(QWidget):
         self._refresh_current_script_parts()
         self._reset_part_views()
         self._refresh_workspace_components_tree()
-        self._reselect_workspace_part_node(node_path[:-1])
+        if parent_component_id is not None:
+            self._reselect_workspace_component(parent_component_id)
+        else:
+            self._reselect_workspace_part_node(node_path[:-1])
 
 
     def duplicate_selected_component(self) -> None:

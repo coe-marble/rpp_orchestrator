@@ -440,7 +440,11 @@ class Workspace:
 
     def write_part_descriptor(self, folder: Path,
             record: ComponentRecord) -> Path:
-        return self.component_data_store.save_description(folder, record)
+        description_path = self.component_data_store.save_description(
+            folder, record
+        )
+        self.part_records[record.id] = record
+        return description_path
 
     @classmethod
     def part_description_path(cls, folder: Path) -> Path:
@@ -738,8 +742,12 @@ class Workspace:
             parent_subcomponents, slot_name, subcomponent_id: str) -> None:
         slot_subcomponents = parent_subcomponents[slot_name]
         if isinstance(slot_subcomponents, list):
-            parent_subcomponents[slot_name] = \
+            remaining_subcomponents = \
                 [sub for sub in slot_subcomponents if sub.id != subcomponent_id]
+            if remaining_subcomponents:
+                parent_subcomponents[slot_name] = remaining_subcomponents
+            else:
+                parent_subcomponents.pop(slot_name, None)
         else:
             parent_subcomponents.pop(slot_name, None)
         return parent_subcomponents
@@ -832,10 +840,10 @@ class Workspace:
         )
         existing = components.get(component_key)
         record = self.get_part_record_by_id(record_id)
-
-        if record.plugin_type != script_h.slots.get(component_key):
+        slot_type, allow_list = ComponentContext.parse_component_slot_type(script_h.slots.get(component_key))
+        if record.plugin_type != slot_type:
             raise ValueError(f"Plugin type '{record.plugin_name}'"
-                + f" does not match slot type '{script_h.slots.get(component_key)}'"
+                + f" does not match slot type '{slot_type}'"
                 + f" for slot '{component_key}'.")
 
         new_item = {
@@ -843,7 +851,7 @@ class Workspace:
             "PluginName": record.plugin_name,
         }
 
-        if isinstance(existing, list):
+        if isinstance(existing, list) and allow_list:
             if not any(item.get("Id") == record.id for item in existing):
                 existing.append(new_item)
             components[component_key] = existing
