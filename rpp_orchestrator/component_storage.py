@@ -261,9 +261,12 @@ def _python_safe_value(value: Any) -> Any:
     return str(value)
 
 
-def _python_as_string(value: dict[str, Any] | None, indent = "") -> str:
+def _python_as_string(value: Any, indent: str = "") -> str:
     if value is None:
         return "None"
+    if not isinstance(value, dict) or "type" not in value:
+        return repr(value)
+
     value_type = value["type"]
     if value_type == "bool":
         return "True" if value["default_value"] else "False"

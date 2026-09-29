@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import QSize, QSettings, Qt
+from PyQt6.QtCore import QEvent, QSize, QSettings, Qt
 from PyQt6.QtWidgets import (
     QDialog,
     QFrame,
@@ -238,6 +238,21 @@ class WorkspaceWindow(QMainWindow):
         if path:
             self._open_workspace_path(Path(path))
 
+    def eventFilter(self, source: object, event: QEvent) -> bool:
+        if (
+            source is self.recent_libraries_list
+            and event.type() == QEvent.Type.KeyPress
+            and event.key() == Qt.Key.Key_Delete
+        ):
+            item = self.recent_libraries_list.currentItem()
+            if item is not None:
+                path = item.data(Qt.ItemDataRole.UserRole)
+                if path:
+                    self._forget_library(Path(path))
+            return True
+
+        return super().eventFilter(source, event)
+
     def _expand_for_workspace(self) -> None:
         self.setMinimumSize(*self.WORKSPACE_SIZE)
         self.resize(
@@ -271,6 +286,7 @@ class WorkspaceWindow(QMainWindow):
         self.recent_libraries_list.itemDoubleClicked.connect(
             self._open_recent_library_item
         )
+        self.recent_libraries_list.installEventFilter(self)
         self._refresh_recent_libraries_list()
 
         actions = QWidget(card)
@@ -321,7 +337,7 @@ class WorkspaceWindow(QMainWindow):
                 return
 
         name = lm.lib_name_from_path(path)
-        workspace_root = path / name.strip()
+        workspace_root = path
 
         workspace = create_workspace(workspace_root,
             name=name.strip(), overwrite=True, lib_manager=self.editor.lib_manager)

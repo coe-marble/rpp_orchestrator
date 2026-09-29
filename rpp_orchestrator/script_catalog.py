@@ -68,10 +68,19 @@ class ScriptCatalog:
             if not description_path.is_file():
                 continue
             description = json.loads(description_path.read_text(encoding="utf-8"))
+            if description.get("Linked", False):
+                continue
             script_path_value = description.get("ScriptPath")
             if not isinstance(script_path_value, str):
                 continue
-            script_path = Path(script_path_value).expanduser().resolve()
+            relative_script_path = Path(script_path_value).expanduser()
+            if relative_script_path.is_absolute():
+                continue
+            script_path = (library_path / relative_script_path).resolve()
+            try:
+                script_path.relative_to(library_path)
+            except ValueError:
+                continue
             if not script_path.is_file() or script_path.suffix not in supported_extensions:
                 continue
             script_name = description.get("ScriptName", script_path.stem)

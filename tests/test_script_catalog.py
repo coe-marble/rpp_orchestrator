@@ -46,15 +46,15 @@ def test_catalog_discovers_scripts_from_other_registered_libraries(tmp_path: Pat
     controller_py.parent.mkdir(parents=True)
     controller_py.write_text("", encoding="utf-8")
     (descriptions_path / "controller.json").write_text(
-        '{"ScriptPath": "' + str(controller_cpp) + '", "ScriptName": "controller"}',
+        '{"ScriptPath": "controller.cpp", "ScriptName": "controller"}',
         encoding="utf-8",
     )
     (descriptions_path / "nested-controller.json").write_text(
-        '{"ScriptPath": "' + str(controller_py) + '", "ScriptName": "nested/controller"}',
+        '{"ScriptPath": "nested/controller.py", "ScriptName": "nested/controller"}',
         encoding="utf-8",
     )
     (descriptions_path / "notes.json").write_text(
-        '{"ScriptPath": "' + str(other_library / "notes.txt") + '"}',
+        '{"ScriptPath": "notes.txt"}',
         encoding="utf-8",
     )
 
@@ -79,7 +79,7 @@ def test_catalog_excludes_already_linked_libraries(tmp_path: Path):
     script_path = library / "controller.py"
     script_path.write_text("", encoding="utf-8")
     (descriptions_path / "controller.json").write_text(
-        '{"ScriptPath": "' + str(script_path) + '", "ScriptName": "controller"}',
+        '{"ScriptPath": "controller.py", "ScriptName": "controller"}',
         encoding="utf-8",
     )
 

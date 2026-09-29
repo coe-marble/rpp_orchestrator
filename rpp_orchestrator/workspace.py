@@ -86,9 +86,10 @@ class Workspace:
         return rppws_folder.exists() and rppws_folder.is_dir()
 
     @classmethod
-    def clear(cls) -> None:
-        # Clear the workspace by removing the .rppws folder
-        rppws_folder = Path(".rppws")
+    def clear(cls, root: str | Path) -> None:
+        # Clear the workspace by removing its .rppws folder
+        root_path = Path(root).expanduser().resolve()
+        rppws_folder = root_path / ".rppws"
         if rppws_folder.exists() and rppws_folder.is_dir():
             shutil.rmtree(rppws_folder)
 
@@ -176,12 +177,15 @@ class Workspace:
         for script_file in script_descriptions_path.iterdir():
             if script_file.is_file() and script_file.suffix == ".json":
                 json_data = _json_load(script_file)
-                script_path = json_data.get("ScriptPath")
-                if not Path(script_path).exists():
+                try:
+                    script_path = self._resolve_description_script_path(json_data)
+                except (KeyError, OSError, ValueError):
+                    continue
+                if not script_path.is_file():
                     continue
                 language = json_data.get("Language")
                 scripts.append(ScriptHandle(
-                    path=Path(script_path), ws=self, language=language,
+                    path=script_path, ws=self, language=language,
                     description_path=script_file,
                 ))
         return scripts
@@ -214,7 +218,7 @@ class Workspace:
         description_path = self.get_script_description_path(script_path)
         if description_path.exists():
             existing = _json_load(description_path)
-            existing_path = Path(existing["ScriptPath"]).expanduser().resolve()
+            existing_path = self._resolve_description_script_path(existing)
             if existing_path == script_path:
                 script_handle = ScriptHandle(
                     script_path, self, language=language,
@@ -229,7 +233,7 @@ class Workspace:
         description_path = self.get_linked_script_description_path(script_name)
         if description_path.exists():
             existing = _json_load(description_path)
-            existing_path = Path(existing["ScriptPath"]).expanduser().resolve()
+            existing_path = self._resolve_description_script_path(existing)
             if existing_path != script_path:
                 raise ValueError(f"Script identity collision for '{script_name}'.")
         else:
@@ -240,6 +244,12 @@ class Workspace:
                 DEFAULT_CONFIGURATION_NAME,
                 {},
             ).to_dict()
+            description["Linked"] = True
+            description["ScriptName"] = script_name
+            description["ScriptLibrary"] = library
+            description["ScriptPath"] = self._serialize_script_path(
+                script_path, description
+            )
             description_path.write_text(
                 json.dumps(description, indent=4, sort_keys=False), encoding="utf-8"
             )
@@ -490,12 +500,49 @@ class Workspace:
         for description_path in self.script_descriptions_path.glob("*.json"):
             try:
                 description = _json_load(description_path)
-                described_path = Path(description["ScriptPath"]).expanduser().resolve()
+                described_path = self._resolve_description_script_path(description)
             except (KeyError, OSError, ValueError, json.JSONDecodeError):
                 continue
             if described_path == resolved_script_path:
                 return description_path
         return self.script_descriptions_path / f"{script_path.stem}.json"
+
+    def _description_script_root(self, description: dict[str, Any]) -> Path:
+        library_name = description.get("ScriptLibrary")
+        if isinstance(library_name, str) and library_name:
+            library_path = self.lib_manager.get_library_path(library_name)
+            if library_path is not None:
+                return Path(library_path).expanduser().resolve()
+        return self.root
+
+    def _resolve_description_script_path(
+        self, description: dict[str, Any]
+    ) -> Path:
+        script_path_value = description["ScriptPath"]
+        if not isinstance(script_path_value, str) or not script_path_value:
+            raise ValueError("ScriptPath must be a non-empty string.")
+
+        stored_path = Path(script_path_value).expanduser()
+        if stored_path.is_absolute():
+            return stored_path.resolve()
+
+        script_root = self._description_script_root(description)
+        script_path = (script_root / stored_path).resolve()
+        try:
+            script_path.relative_to(script_root)
+        except ValueError as exc:
+            raise ValueError("ScriptPath must remain within its library.") from exc
+        return script_path
+
+    def _serialize_script_path(
+        self, script_path: Path, description: dict[str, Any]
+    ) -> str:
+        resolved_script_path = script_path.expanduser().resolve()
+        script_root = self._description_script_root(description)
+        try:
+            return resolved_script_path.relative_to(script_root).as_posix()
+        except ValueError:
+            return str(resolved_script_path)
 
     def get_linked_script_description_path(self, script_name: str) -> Path:
         digest = hashlib.sha256(script_name.encode("utf-8")).hexdigest()[:12]
@@ -811,6 +858,7 @@ class Workspace:
     def _write_script_description_payload(
         self, description: dict[str, Any], script_path: Path
     ) -> None:
+        description["ScriptPath"] = self._serialize_script_path(script_path, description)
         assignments_path = self.get_script_description_path(script_path)
         assignments_path.write_text(
             json.dumps(description, indent=4, sort_keys=False),
@@ -840,7 +888,16 @@ class Workspace:
         )
         existing = components.get(component_key)
         record = self.get_part_record_by_id(record_id)
-        slot_type, allow_list = ComponentContext.parse_component_slot_type(script_h.slots.get(component_key))
+        slot_spec = script_h.slots.get(component_key)
+        if slot_spec is None:
+            available_slots = ", ".join(sorted(script_h.slots)) or "none"
+            raise ValueError(
+                f"Slot {component_key} was not found in script "
+                f"{script_h.path.name}. Available slots: {available_slots}."
+            )
+        slot_type, allow_list = ComponentContext.parse_component_slot_type(
+            slot_spec
+        )
         if record.plugin_type != slot_type:
             raise ValueError(f"Plugin type '{record.plugin_name}'"
                 + f" does not match slot type '{slot_type}'"
@@ -937,7 +994,7 @@ def create_workspace(root: str | Path,
             f"Workspace root already exists and is not empty: {root_path}"
         )
     if exists:
-        Workspace.clear()
+        Workspace.clear(root_path)
     root_path.mkdir(parents=True, exist_ok=True)
     workspace = Workspace(root=root_path, lib_manager=lib_manager)
     workspace.ensure_layout()

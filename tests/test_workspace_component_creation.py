@@ -88,7 +88,7 @@ def test_write_components_roundtrip(tmp_path: Path) -> None:
     script_path = workspace.root / "demo_ws.py"
 
     payload = {
-        "ScriptPath": str(script_path),
+        "ScriptPath": "demo_ws.py",
         "Language": "python",
         "Configurations": {
             "Default": {
@@ -121,7 +121,7 @@ def test_components_only_script_description_is_rejected(tmp_path: Path) -> None:
     script_path = workspace.root / "demo_ws.py"
     description_path = workspace.get_script_description_path(script_path)
     description_path.write_text(json.dumps({
-        "ScriptPath": str(script_path),
+        "ScriptPath": "demo_ws.py",
         "Language": "python",
         "Components": {},
         "Spec": {},
@@ -167,6 +167,37 @@ def test_linked_script_removal_preserves_external_source(tmp_path: Path) -> None
 
     assert external_script.exists()
     assert not workspace.get_script_description_path(script.path).exists()
+
+
+def test_linked_script_path_is_relative_to_its_registered_library(
+        tmp_path: Path) -> None:
+    library_root = tmp_path / "external_library"
+    external_script = library_root / "Scripts" / "controller.py"
+    external_script.parent.mkdir(parents=True)
+    external_script.write_text(
+        "class Controller:\n    COMPONENTS = {}\n", encoding="utf-8"
+    )
+    library_manager = mock.Mock(spec=LibraryManager)
+    library_manager.get_library_path.side_effect = lambda name: (
+        str(library_root) if name == "external_library" else None
+    )
+    workspace = create_workspace(
+        tmp_path / "workspace", name="workspace", lib_manager=library_manager
+    )
+
+    script = workspace.link_registered_script(
+        external_script,
+        "external_library::controller",
+        "external_library",
+        "python",
+    )
+
+    description = script.load_description()
+    assert description["ScriptPath"] == "Scripts/controller.py"
+    assert {listed_script.path for listed_script in workspace.list_scripts()} == {
+        workspace.root / "workspace.py",
+        external_script,
+    }
 
 
 def test_same_named_scripts_from_different_libraries_have_distinct_bindings(

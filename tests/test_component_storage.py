@@ -5,7 +5,10 @@ import pytest
 
 import rpp_plugin_registrator.registry_config as rp
 from rpp_plugin_registrator.library_manager import LibraryManager
-from rpp_orchestrator.component_storage import ComponentDataStore
+from rpp_orchestrator.component_storage import (
+    ComponentDataStore,
+    ComponentParameterStore,
+)
 
 from tests.utils import setup_test_plugins
 
@@ -44,6 +47,22 @@ def new_test_workspace(tmp_path: Path) -> Generator[Path, None, None]:
 @pytest.fixture(scope="module")
 def setup_plugins(rpp_home) -> Generator[LibraryManager, None, None]:
     yield setup_test_plugins(rpp_home)
+
+
+def test_component_parameter_store_saves_loaded_scalar_values(
+        tmp_path: Path) -> None:
+    store = ComponentParameterStore()
+    component_folder = tmp_path / "component"
+    store.ensure_parameters_file(
+        component_folder,
+        {"mass": {"type": "float", "default_value": 801.01905}},
+    )
+
+    parameters = store.load(component_folder)
+    parameters["mass"] = 200.0
+    store.save(component_folder, parameters)
+
+    assert store.load(component_folder) == {"mass": 200.0}
 
 
 def test_create_component_folder_then_remove_component(new_test_workspace: Path, rpp_home: Path, setup_plugins: LibraryManager) -> None:
