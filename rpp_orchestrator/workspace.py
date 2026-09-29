@@ -830,6 +830,193 @@ class Workspace:
         duplicated_record = self.component_data_store.load_description(duplicated_folder)
         return duplicated_record
 
+
+    @staticmethod
+    def _configuration_component_ids(
+        components: dict[str, Any],
+    ) -> list[str]:
+        component_ids: list[str] = []
+        for slot_name, assignment in components.items():
+            assignments = (
+                assignment if isinstance(assignment, list) else [assignment]
+            )
+            for item in assignments:
+                if (
+                    not isinstance(item, dict)
+                    or not isinstance(item.get("Id"), str)
+                ):
+                    raise ValueError(
+                        f"Configuration slot {slot_name} contains an invalid "
+                        "component assignment."
+                    )
+                component_ids.append(item["Id"])
+        return component_ids
+
+
+    @staticmethod
+    def _rewrite_configuration_component_ids(
+        components: dict[str, Any], component_ids: dict[str, str]
+    ) -> dict[str, Any]:
+        rewritten = copy.deepcopy(components)
+        for slot_name, assignment in rewritten.items():
+            assignments = (
+                assignment if isinstance(assignment, list) else [assignment]
+            )
+            for item in assignments:
+                source_id = item["Id"]
+                try:
+                    item["Id"] = component_ids[source_id]
+                except KeyError as exc:
+                    raise ValueError(
+                        f"Configuration slot {slot_name} references component "
+                        f"{source_id}, which was not copied."
+                    ) from exc
+        return rewritten
+
+
+    @staticmethod
+    def _component_tree_records(
+        source_workspace: "Workspace", root_component: ComponentRecord
+    ) -> list[ComponentRecord]:
+        records: list[ComponentRecord] = []
+        pending = [root_component]
+        seen_ids: set[str] = set()
+        while pending:
+            record = pending.pop()
+            if record.id in seen_ids:
+                continue
+            seen_ids.add(record.id)
+            if isinstance(record, LinkedComponentRecord):
+                raise ValueError(
+                    f"Cannot import linked component {record.name} "
+                    f"({record.id})."
+                )
+            records.append(record)
+            for subcomponent in record.subcomponents.values():
+                subcomponents = (
+                    subcomponent if isinstance(subcomponent, list)
+                    else [subcomponent]
+                )
+                for child_info in subcomponents:
+                    child_record = source_workspace.get_part_record_by_id(
+                        child_info.id
+                    )
+                    if child_record is None:
+                        raise ValueError(
+                            f"Component {record.name} references missing "
+                            f"subcomponent {child_info.id}."
+                        )
+                    pending.append(child_record)
+        return records
+
+    def import_script_configuration(
+        self,
+        source_workspace: "Workspace",
+        source_script: ScriptHandle,
+        source_configuration_name: str,
+        target_script: ScriptHandle,
+        target_configuration_name: str | None = None,
+    ) -> dict[str, str]:
+        """Deep-copy a source configuration and its component trees."""
+        target_name = (
+            target_configuration_name or source_configuration_name
+        ).strip()
+        if not target_name:
+            raise ValueError("Configuration name cannot be empty.")
+
+        source_description = source_script.load_description()
+        source_components = self.script_configuration_components(
+            source_description, source_configuration_name
+        )
+        target_description = target_script.load_description()
+        target_configurations = target_description["Configurations"]
+        if target_name in target_configurations:
+            raise ValueError(
+                f"Configuration {target_name} already exists in target script."
+            )
+
+        root_ids = self._configuration_component_ids(source_components)
+        source_roots: list[ComponentRecord] = []
+        source_tree_records: dict[str, ComponentRecord] = {}
+        seen_root_ids: set[str] = set()
+        for component_id in root_ids:
+            if component_id in seen_root_ids:
+                continue
+            seen_root_ids.add(component_id)
+            component = source_workspace.get_part_record_by_id(component_id)
+            if component is None:
+                raise ValueError(
+                    f"Source configuration references missing component "
+                    f"{component_id}."
+                )
+            if isinstance(component, LinkedComponentRecord):
+                raise ValueError(
+                    f"Cannot import linked component {component.name} "
+                    f"({component.id})."
+                )
+            if component.parent_component_info is not None:
+                raise ValueError(
+                    f"Source configuration references nested component "
+                    f"{component.name} ({component.id}) as a root."
+                )
+            source_roots.append(component)
+            for record in self._component_tree_records(
+                source_workspace, component
+            ):
+                source_tree_records[record.id] = record
+
+        source_names = [record.name for record in source_tree_records.values()]
+        if len(source_names) != len(set(source_names)):
+            raise ValueError(
+                "Source component tree contains duplicate component names."
+            )
+        target_names = {record.name for record in self.part_records.values()}
+        collisions = sorted(set(source_names) & target_names)
+        if collisions:
+            raise ValueError(
+                "Target workspace already contains component names: "
+                + ", ".join(collisions)
+            )
+
+        copied_roots: list[
+            tuple[ComponentRecord, dict[str, ComponentRecord]]
+        ] = []
+        copied_root_ids: dict[str, str] = {}
+        try:
+            for source_root in source_roots:
+                copied_folder, copied_records = (
+                    self.component_data_store.duplicate_component_folder(
+                        source_root.folder, source_root.name
+                    )
+                )
+                copied_root = self.component_data_store.load_description(
+                    copied_folder
+                )
+                copied_roots.append((copied_root, copied_records))
+                copied_root_ids[source_root.id] = copied_root.id
+
+            for _, copied_records in copied_roots:
+                self.part_records.update(copied_records)
+
+            target_configurations[target_name] = {
+                "Components": self._rewrite_configuration_component_ids(
+                    source_components, copied_root_ids
+                )
+            }
+            self._write_script_description_payload(
+                target_description, target_script.path
+            )
+        except Exception:
+            for copied_root, copied_records in copied_roots:
+                self.component_data_store.remove_component_folder(
+                    copied_root.folder
+                )
+                for component_id in copied_records:
+                    self.part_records.pop(component_id, None)
+            raise
+
+        return copied_root_ids
+
     def write_script_description(self,
             script_path: Path, language: str,
             assignments: dict[str, list[str]],

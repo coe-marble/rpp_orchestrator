@@ -32,7 +32,7 @@ from rpp_plugin_registrator import registry_config as rp
 from rpp_orchestrator.workspace import Workspace, ComponentRecord
 from rpp_orchestrator.gui.assign_or_create_component_dialog import create_assign_or_create_component_dialog
 
-from tests.utils import setup_test_plugins, create_mock_workspace
+from tests.utils import create_mock_workspace, example_source, setup_test_plugins
 
 
 @pytest.fixture(scope="module")
@@ -755,6 +755,70 @@ def test_assign_subcomponent_to_parent_then_remove_linked_component_raises(
         ws.remove_component(child_component.id)
 
     assert "Cannot remove component" in str(exc_info.value)
+
+
+def test_import_script_configuration_copies_component_tree(
+    setup_plugins: LibraryManager,
+    tmp_path: Path,
+) -> None:
+
+    source_workspace = create_mock_workspace(
+        tmp_path / "source", setup_plugins.rpp_home
+    )
+    source_script = next(
+        script for script in source_workspace.list_scripts()
+        if script.path.name == "example.py"
+    )
+    source_parent = source_workspace.get_component("parent_component")
+    assert source_parent is not None
+    source_callbacks = source_parent.folder / "callbacks.py"
+    source_callbacks.write_text("source callback", encoding="utf-8")
+    source_parameters = source_parent.folder / "params" / "parameters.py"
+    source_parameters.write_text("mass = 123.0\n", encoding="utf-8")
+    source_workspace.create_script_configuration(source_script, "Jet")
+    source_workspace.assign_component_to_script(
+        source_script, "ctl_main", source_parent.id, configuration_name="Jet"
+    )
+
+    target_workspace = create_workspace(
+        tmp_path / "target", name="target", overwrite=True
+    )
+    target_workspace.create_script("example.py", example_source())
+    target_script = next(
+        script for script in target_workspace.list_scripts()
+        if script.path.name == "example.py"
+    )
+
+    component_ids = target_workspace.import_script_configuration(
+        source_workspace, source_script, "Jet", target_script
+    )
+
+    copied_parent_id = component_ids[source_parent.id]
+    copied_parent = target_workspace.get_part_record_by_id(copied_parent_id)
+    assert copied_parent is not None
+    assert copied_parent.id != source_parent.id
+    assert copied_parent.name == source_parent.name
+    assert (copied_parent.folder / "callbacks.py").read_text(
+        encoding="utf-8"
+    ) == "source callback"
+    assert (copied_parent.folder / "params" / "parameters.py").read_text(
+        encoding="utf-8"
+    ) == "mass = 123.0\n"
+
+    source_child = source_workspace.get_subcomponent(source_parent.id, "ctl1")
+    copied_child = target_workspace.get_subcomponent(copied_parent.id, "ctl1")
+    assert source_child is not None
+    assert copied_child is not None
+    assert copied_child.id != source_child.id
+    assert copied_child.parent_component_info.id == copied_parent.id
+
+    target_description = target_script.load_description()
+    imported_assignment = target_description["Configurations"]["Jet"][
+        "Components"
+    ]["ctl_main"]
+    assert imported_assignment["Id"] == copied_parent.id
+    assert imported_assignment["PluginName"] == copied_parent.plugin_name
+
 
 def test_duplicate_component_simple(setup_plugins: LibraryManager, tmp_path: Path) -> None:
 
