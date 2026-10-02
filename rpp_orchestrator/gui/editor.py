@@ -658,7 +658,7 @@ class WorkspaceEditor(QWidget):
 
         specs = {}
         for key in subcomponent_spec:
-            plugin_type, _ = ComponentContext.parse_component_slot_type(
+            plugin_type, allow_list = ComponentContext.parse_component_slot_type(
                 record.subcomponent_spec[key])
             child_item = QTreeWidgetItem([f"{key} ({plugin_type})"])
             path = node_path + (key,)
@@ -669,6 +669,7 @@ class WorkspaceEditor(QWidget):
                     "id": str(path),
                     "node_path": path,
                     "plugin_type": plugin_type,
+                    "allow_list": allow_list,
                     "parent_component_id": str(record.id),
                     "component_key": str(key),
                     "subcomponent_spec": True,
@@ -770,10 +771,18 @@ class WorkspaceEditor(QWidget):
 
         if "subcomponent_spec" in payload and payload["subcomponent_spec"] is True:
             # Handle subcomponent spec selection
-            if current.childCount() > 0:
-                self.add_component_button.setText("Override Subcomponent")
-            else:
+            parent_record = self.workspace.get_component(
+                payload["parent_component_id"]
+            )
+            slot_is_occupied = bool(
+                (parent_record.subcomponents or {}).get(
+                    payload["component_key"]
+                )
+            )
+            if payload.get("allow_list", False) or not slot_is_occupied:
                 self.add_component_button.setText("Add Subcomponent")
+            else:
+                self.add_component_button.setText("Override Subcomponent")
             self.add_component_button.setEnabled(True)
             self.remove_component_button.setEnabled(False)
             self.duplicate_component_button.setEnabled(False)
