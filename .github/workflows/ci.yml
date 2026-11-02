@@ -1,0 +1,48 @@
+name: Python tests
+
+on:
+  push:
+    branches: [develop]
+  pull_request:
+    branches: [develop]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - name: Check out repository under test
+        uses: actions/checkout@v4
+        with:
+          path: candidate
+      - name: Check out RPP integration dependencies
+        uses: actions/checkout@v4
+        with:
+          repository: coe-marble/rpp_dev
+          ref: develop
+          path: rpp_dev
+          submodules: recursive
+          token: ${{ secrets.RPP_CI_TOKEN || github.token }}
+      - name: Overlay the repository under test
+        run: rsync -a --delete --exclude=.git candidate/ rpp_dev/src/rpp_orchestrator/
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          for package in rpp_dev/src/rpp_common rpp_dev/src/rpp_plugin_registrator rpp_dev/src/rpp_orchestrator rpp_dev/src/rpp_py rpp_dev/src/rpp_cli rpp_dev/src/rpp_testing; do
+            python -m pip install --no-deps -e "$package"
+          done
+          python -m pip install -e "rpp_dev/src/rpp_orchestrator[test]"
+      - name: Run tests
+        run: python -m pytest rpp_dev/src/rpp_orchestrator/tests

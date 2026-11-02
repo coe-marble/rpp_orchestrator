@@ -816,8 +816,10 @@ def test_import_script_configuration_copies_component_tree(
     imported_assignment = target_description["Configurations"]["Jet"][
         "Components"
     ]["ctl_main"]
-    assert imported_assignment["Id"] == copied_parent.id
-    assert imported_assignment["PluginName"] == copied_parent.plugin_name
+    assert imported_assignment == [{
+        "Id": copied_parent.id,
+        "PluginName": copied_parent.plugin_name,
+    }]
 
 
 def test_duplicate_component_simple(setup_plugins: LibraryManager, tmp_path: Path) -> None:

@@ -33,12 +33,12 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from rpp_common.component_slots import parse_component_slot_type
 from rpp_orchestrator.component_storage import LinkedComponentRecord, ComponentRecord
 from rpp_orchestrator.gui.new_script_dialog import NewScriptDialog
 from rpp_orchestrator.gui.link_script_dialog import LinkScriptDialog
 
 from rpp_plugin_registrator.library_manager import LibraryManager
-from rpp_py.context import ComponentContext
 
 from .assign_or_create_component_dialog import create_assign_or_create_component_dialog
 from ..vscode_debug_config_service import VscodeDebugConfigService
@@ -580,7 +580,7 @@ class WorkspaceEditor(QWidget):
         self.script_part_tree.addTopLevelItem(components_item)
 
         for key, value in components.items():
-            plugin_type_name, _ = ComponentContext.parse_component_slot_type(value)
+            plugin_type_name, _ = parse_component_slot_type(value)
             try:
                 type_info = self.get_plugin_type_info(plugin_type_name)
             except Exception:
@@ -658,7 +658,7 @@ class WorkspaceEditor(QWidget):
 
         specs = {}
         for key in subcomponent_spec:
-            plugin_type, allow_list = ComponentContext.parse_component_slot_type(
+            plugin_type, allow_list = parse_component_slot_type(
                 record.subcomponent_spec[key])
             child_item = QTreeWidgetItem([f"{key} ({plugin_type})"])
             path = node_path + (key,)

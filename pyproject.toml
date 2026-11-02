@@ -6,7 +6,16 @@ build-backend = "setuptools.build_meta"
 name = "rpp-orchestrator"
 version = "0.1.0"
 description = "RPP orchestration and workspace management"
-dependencies = ["PyQt6"]
+requires-python = ">=3.10"
+dependencies = [
+    "PyQt6>=6.4,<7",
+    "rpp-common>=0.1,<0.2",
+    "rpp-plugin-registrator>=0.1,<0.2",
+]
+
+[project.optional-dependencies]
+runtime = ["rpp-py>=0.1,<0.2"]
+test = ["pytest>=8,<9"]
 
 [project.scripts]
 rpp-orchestrator = "rpp_orchestrator.cli:main"

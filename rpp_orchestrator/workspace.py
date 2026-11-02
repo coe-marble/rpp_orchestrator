@@ -8,9 +8,9 @@ import json
 import shutil
 from typing import Any, Generator
 
+from rpp_common.component_slots import parse_component_slot_type
 from rpp_orchestrator.layout import ComponentLayout
 from rpp_plugin_registrator.library_manager import LibraryManager
-from rpp_py.context import ComponentContext
 
 from .component_storage import (
     ComponentDataStore,
@@ -286,6 +286,7 @@ class Workspace:
             script_path = self.root / script_path_or_name
         else:
             script_path = script_path_or_name
+        script_path = script_path.resolve()
         extension = script_path.suffix
         language = get_script_language_from_path(script_path) if extension else language
         if not extension:
@@ -293,8 +294,12 @@ class Workspace:
             script_path = script_path.with_suffix(extension)
 
 
-        if not script_path.relative_to(self.root):
-            raise ValueError(f"Script path must be within the scripts directory: {self.root}")
+        try:
+            script_path.relative_to(self.root.resolve())
+        except ValueError as exc:
+            raise ValueError(
+                f"Script path must be within the workspace: {self.root}"
+            ) from exc
         if extension:
             if extension not in {spec.extension for spec in SCRIPT_LANGUAGES.values()}:
                 raise ValueError(f"Invalid script extension: {extension}")
@@ -1053,7 +1058,13 @@ class Workspace:
         )
 
     def write_context(self, name: str, source: str, filename: str | None = None) -> Path:
-        target = self.root / (filename or name)
+        target = (self.root / (filename or name)).resolve()
+        try:
+            target.relative_to(self.root.resolve())
+        except ValueError as exc:
+            raise ValueError(
+                f"Context path must be within the workspace: {self.root}"
+            ) from exc
         target.write_text(source, encoding="utf-8")
         return target
 
@@ -1082,9 +1093,7 @@ class Workspace:
                 f"Slot {component_key} was not found in script "
                 f"{script_h.path.name}. Available slots: {available_slots}."
             )
-        slot_type, allow_list = ComponentContext.parse_component_slot_type(
-            slot_spec
-        )
+        slot_type, allow_list = parse_component_slot_type(slot_spec)
         if record.plugin_type != slot_type:
             raise ValueError(f"Plugin type '{record.plugin_name}'"
                 + f" does not match slot type '{slot_type}'"
@@ -1149,7 +1158,7 @@ class Workspace:
             raise ValueError(f"Plugin '{plugin_name}'"
                 + f" does not have a component slot named '{slot_name}'")
 
-        slot_type, allow_list = ComponentContext.parse_component_slot_type(components[slot_name])
+        slot_type, allow_list = parse_component_slot_type(components[slot_name])
         # If it's a list, we don't overwrite; if it's a single component, we can overwrite
         overwrite = not allow_list
 

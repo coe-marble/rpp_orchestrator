@@ -76,12 +76,8 @@ class ScriptHandle:
             self._save_script_with_slots_python()
 
     def assign_component_to_slot(self, slot_name: str, record_id: str) -> None:
-        """Add a component slot to the script's COMPONENTS dict."""
-        description = self.ws.read_script_description(self.path)
-        record = self.ws.get_part_record_by_id(record_id)
-        components = self.ws.active_script_components(description)
-        components[slot_name] = {"PluginType": record.plugin_type, "Components": []}
-        self.ws.write_script_description(self.path, self.language, components, self.slots)
+        """Assign a component using the workspace's validated format."""
+        self.ws.assign_component_to_script(self, slot_name, record_id)
 
     def remove_component_from_slot(self, slot_name: str) -> None:
         """Remove a component slot from the script's COMPONENTS dict."""
@@ -169,11 +165,13 @@ def _python_default_script_source(class_name: str) -> str:
 
 def _cpp_default_script_source(class_name: str) -> str:
     return (
+        "#include <stdexcept>\n"
         "#include <rpp_cpp/plugin.hpp>\n\n"
         "namespace rpp {\n\n"
         f"class {class_name}{{\n"
         "public:\n"
-        "    void run() override {\n"
+        "    RPP_COMPONENTS()\n\n"
+        "    void run() {\n"
         "        throw std::runtime_error(\"Define the workspace logic here.\");\n"
         "    }\n"
         "};\n\n"

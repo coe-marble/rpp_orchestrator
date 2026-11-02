@@ -1,5 +1,10 @@
 # RPP Orchestrator
 
+`rpp-orchestrator` provides workspace and GUI management without requiring the
+Python component runtime. Install `rpp-orchestrator[runtime]` when the
+component runtime is also required; the full RPP setup installs it through
+`rpp-py` and `rpp-cli`.
+
 The orchestrator stores one script description per script in
 `.rppws/script_descriptions/<script-name>.json`.
 

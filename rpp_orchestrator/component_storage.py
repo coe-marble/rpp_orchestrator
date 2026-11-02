@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace as dataclasses_replace
 import importlib.util
+import keyword
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -281,8 +282,8 @@ def _python_as_string(value: Any, indent: str = "") -> str:
         if value != value:
             return 'float("nan")'
         return f"{value}"
-    if value_type == "str":
-        return f'"{value["default_value"]}"'
+    if value_type in {"str", "string"}:
+        return repr(str(value.get("default_value", "")))
     new_indent = indent + "    "
     if value_type == "array":
         elements = value.get("elements", value.get("default_value", []))
@@ -292,7 +293,7 @@ def _python_as_string(value: Any, indent: str = "") -> str:
         ) + f"\n{indent}]"
     if value_type == "object":
         return "{\n" + ",\n".join(
-            f"{new_indent}'{str(key)}': " + _python_as_string(item, new_indent)
+            f"{new_indent}{str(key)!r}: " + _python_as_string(item, new_indent)
             for key, item in value.get("fields", {}).items()
         ) + f"\n{indent}}}"
     return repr(str(value))
@@ -303,6 +304,8 @@ def _build_component_parameters_source(payload: dict[str, Any]) -> str:
         "", "", "class ComponentParameters:"]
 
     for name, value in payload.items():
+        if not isinstance(name, str) or not name.isidentifier() or keyword.iskeyword(name):
+            raise ValueError(f"Parameter name '{name}' is not a valid Python identifier.")
         lines.append(
             f"    {name} = {_python_as_string(value, indent='    ')}")
     if len(payload) == 0:

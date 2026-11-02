@@ -27,8 +27,14 @@ class ScriptCatalog:
 
     script_descriptions_path = Path(".rppws") / "script_descriptions"
 
-    def __init__(self, library_manager: LibraryManager) -> None:
-        self.library_manager = library_manager
+    def __init__(self, library_manager: LibraryManager | None = None) -> None:
+        self._library_manager = library_manager
+
+    @property
+    def library_manager(self) -> LibraryManager:
+        if self._library_manager is None:
+            self._library_manager = LibraryManager()
+        return self._library_manager
 
     def list_registered_scripts(
         self,

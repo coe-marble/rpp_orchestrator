@@ -3,5 +3,3 @@ Name: rpp-orchestrator
 Version: 0.1.0
 Summary: RPP orchestration and workspace management
 Requires-Dist: PyQt6
-Dynamic: requires-dist
-Dynamic: summary
