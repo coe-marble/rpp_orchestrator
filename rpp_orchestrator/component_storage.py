@@ -9,6 +9,7 @@ from uuid import uuid4
 import json
 import shutil
 
+from rpp_common.helpers import restore_on_failure
 from .layout import ComponentLayout, default_component_layout
 from rpp_plugin_registrator import plugin_id_from_name
 
@@ -636,13 +637,14 @@ class ComponentDataStore:
 
         new_component_records = {}
 
-        new_folder.parent.mkdir(parents=True, exist_ok=True)
-        self._copy_component_folder(component_folder, new_folder)
-        self._setup_duplicated_components_recursive(new_folder,
-                target_id=new_record_id,
-                target_name=new_name,
-                parent_component_id=None,
-                new_component_records=new_component_records)
+        with restore_on_failure(trees=[new_folder]):
+            new_folder.parent.mkdir(parents=True, exist_ok=True)
+            self._copy_component_folder(component_folder, new_folder)
+            self._setup_duplicated_components_recursive(new_folder,
+                    target_id=new_record_id,
+                    target_name=new_name,
+                    parent_component_id=None,
+                    new_component_records=new_component_records)
         return new_folder, new_component_records
 
     def remove_component_folder(self, component_folder: Path) -> None:

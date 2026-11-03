@@ -9,6 +9,7 @@ import shutil
 from typing import Any, Generator
 
 from rpp_common.component_slots import parse_component_slot_type
+from rpp_common.helpers import restore_on_failure
 from rpp_orchestrator.layout import ComponentLayout
 from rpp_plugin_registrator.library_manager import LibraryManager
 
@@ -983,41 +984,36 @@ class Workspace:
                 + ", ".join(collisions)
             )
 
-        copied_roots: list[
-            tuple[ComponentRecord, dict[str, ComponentRecord]]
-        ] = []
+        copied_folders: list[Path] = []
+        original_records = self.part_records.copy()
         copied_root_ids: dict[str, str] = {}
         try:
-            for source_root in source_roots:
-                copied_folder, copied_records = (
-                    self.component_data_store.duplicate_component_folder(
-                        source_root.folder, source_root.name
+            with restore_on_failure(
+                    files=[target_script.description_path], created_trees=copied_folders):
+                for source_root in source_roots:
+                    copied_folder, copied_records = (
+                        self.component_data_store.duplicate_component_folder(
+                            source_root.folder, source_root.name
+                        )
                     )
-                )
-                copied_root = self.component_data_store.load_description(
-                    copied_folder
-                )
-                copied_roots.append((copied_root, copied_records))
-                copied_root_ids[source_root.id] = copied_root.id
+                    copied_folders.append(copied_folder)
+                    copied_root = self.component_data_store.load_description(
+                        copied_folder
+                    )
+                    self.part_records.update(copied_records)
+                    copied_root_ids[source_root.id] = copied_root.id
 
-            for _, copied_records in copied_roots:
-                self.part_records.update(copied_records)
-
-            target_configurations[target_name] = {
-                "Components": self._rewrite_configuration_component_ids(
-                    source_components, copied_root_ids
+                target_configurations[target_name] = {
+                    "Components": self._rewrite_configuration_component_ids(
+                        source_components, copied_root_ids
+                    )
+                }
+                self._write_script_description_payload(
+                    target_description, target_script.path
                 )
-            }
-            self._write_script_description_payload(
-                target_description, target_script.path
-            )
         except Exception:
-            for copied_root, copied_records in copied_roots:
-                self.component_data_store.remove_component_folder(
-                    copied_root.folder
-                )
-                for component_id in copied_records:
-                    self.part_records.pop(component_id, None)
+            self.part_records.clear()
+            self.part_records.update(original_records)
             raise
 
         return copied_root_ids
