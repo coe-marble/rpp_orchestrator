@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from .gui import main as gui_main
 from .workspace import create_workspace
 
 
@@ -15,6 +14,11 @@ def command_create(args) -> int:
 
 
 def command_gui(args) -> int:
+    # Keep Qt out of the non-GUI CLI path.  ``rpp ws create`` is also used by
+    # automation and must not require a display server or Qt's native shared
+    # libraries merely because the GUI command is available.
+    from .gui import main as gui_main
+
     workspace_root = getattr(args, "root", None)
     if workspace_root:
         return gui_main(Path(workspace_root).expanduser().resolve())

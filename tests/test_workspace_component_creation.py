@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import importlib.util
 import json
 from pathlib import Path
@@ -30,8 +31,7 @@ from rpp_orchestrator.workspace import create_workspace, open_workspace, default
 from rpp_plugin_registrator.library_manager import LibraryManager
 from rpp_plugin_registrator import registry_config as rp
 from rpp_orchestrator.workspace import Workspace, ComponentRecord
-from rpp_orchestrator.gui.assign_or_create_component_dialog import create_assign_or_create_component_dialog
-
+from tests.fake_qt_helpers import install_fake_qt
 from tests.utils import create_mock_workspace, example_source, setup_test_plugins
 
 
@@ -495,7 +495,8 @@ def test_load_parameters_from_component_parameters_file(setup_plugins, tmp_path:
 
 
 
-def test_assign_or_create_component_dialog_initialization_with_plugins_and_components(setup_plugins: LibraryManager) -> None:
+def test_assign_or_create_component_dialog_initialization_with_plugins_and_components(
+        setup_plugins: LibraryManager, monkeypatch) -> None:
 
     entries_by_library = setup_plugins.get_available_plugins()
 
@@ -527,19 +528,27 @@ def test_assign_or_create_component_dialog_initialization_with_plugins_and_compo
         ],
     }
 
-    import PyQt6.QtWidgets as QtWidgets
-    QtWidgets.QDialog.__init__ = mock.MagicMock()
-
-    import rpp_orchestrator.gui.assign_or_create_component_dialog as file
-    file.QDialog.__init__ = mock.MagicMock()
-    file.QLabel = mock.MagicMock()
-    file.QTreeWidget = mock.MagicMock()
-    file.QTreeWidgetItem = mock.MagicMock()
-    file.QDialogButtonBox = mock.MagicMock()
-    file.QVBoxLayout = mock.MagicMock()
-    file.QMessageBox = mock.MagicMock()
-    file.AssignOrCreateComponentDialog.setWindowTitle = mock.MagicMock()
-    file.AssignOrCreateComponentDialog.resize = mock.MagicMock()
+    install_fake_qt(monkeypatch)
+    file = importlib.import_module(
+        "rpp_orchestrator.gui.assign_or_create_component_dialog"
+    )
+    monkeypatch.setattr(file.QDialog, "__init__", mock.MagicMock())
+    fake_label = mock.MagicMock()
+    fake_label.text.return_value = ""
+    monkeypatch.setattr(file, "QLabel", mock.MagicMock(return_value=fake_label))
+    monkeypatch.setattr(file, "QTreeWidget", mock.MagicMock())
+    monkeypatch.setattr(file, "QTreeWidgetItem", mock.MagicMock())
+    monkeypatch.setattr(file, "QDialogButtonBox", mock.MagicMock())
+    monkeypatch.setattr(file, "QVBoxLayout", mock.MagicMock())
+    monkeypatch.setattr(file, "QMessageBox", mock.MagicMock())
+    monkeypatch.setattr(
+        file.AssignOrCreateComponentDialog, "setWindowTitle", mock.MagicMock(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        file.AssignOrCreateComponentDialog, "resize", mock.MagicMock(),
+        raising=False,
+    )
 
 
     def add_child_side_effect(self, child):
@@ -577,7 +586,7 @@ def test_assign_or_create_component_dialog_initialization_with_plugins_and_compo
     file.QTreeWidgetItem.side_effect = qtreewidgetitem_factory
 
 
-    dialog = create_assign_or_create_component_dialog(
+    dialog = file.create_assign_or_create_component_dialog(
         parent=None,
         workspace_components=workspace_components,
         available_plugins=entries_by_library,

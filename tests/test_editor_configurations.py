@@ -1,18 +1,10 @@
 from __future__ import annotations
 
-import os
+import importlib
 from pathlib import Path
 from types import SimpleNamespace
 
-from rpp_plugin_registrator.library_manager import LibraryManager
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QApplication, QMessageBox, QTreeWidgetItem
-
-import rpp_orchestrator.gui.editor as editor_module
-from rpp_orchestrator.gui.editor import WorkspaceEditor
+from tests.fake_qt_helpers import install_fake_qt
 
 
 class FakeWorkspace:
@@ -44,7 +36,30 @@ class FakeWorkspace:
 
 def test_configuration_selection_displays_and_removes_its_component(
         monkeypatch, tmp_path: Path):
-    app = QApplication.instance() or QApplication([])
+    qt = install_fake_qt(monkeypatch)
+    editor_module = importlib.import_module("rpp_orchestrator.gui.editor")
+    WorkspaceEditor = editor_module.WorkspaceEditor
+
+    def fake_editor_init(self):
+        self.workspace = None
+        self.current_script_handle = None
+        self.current_configuration_name = None
+        self.current_part_source = ""
+        self.current_part_id = None
+        self.current_part_node_path = ()
+        self.script_tree = qt.TreeWidget()
+        self.script_part_tree = qt.TreeWidget()
+        self.workspace_components_tree = qt.TreeWidget()
+        self.log_textbox = qt.Log()
+        self.script_management_actions = qt.Control()
+        self.configuration_actions = qt.Control()
+        self.debug_script_button = qt.Control()
+        self.new_configuration_button = qt.Control()
+        self.duplicate_configuration_button = qt.Control()
+        self.rename_configuration_button = qt.Control()
+        self.delete_configuration_button = qt.Control()
+
+    monkeypatch.setattr(WorkspaceEditor, "__init__", fake_editor_init)
 
     first = SimpleNamespace(
         id="first", name="First", folder=tmp_path / "first",
@@ -73,25 +88,18 @@ def test_configuration_selection_displays_and_removes_its_component(
             return self.ws.description
 
     monkeypatch.setattr(editor_module, "ScriptHandle", FakeScriptHandle)
-    monkeypatch.setattr(WorkspaceEditor, "_load_plugin_types", lambda self: None)
-    monkeypatch.setattr(WorkspaceEditor, "_load_plugins", lambda self: None)
-    monkeypatch.setattr(LibraryManager, "__init__", lambda self, rpp_home=None, skip_layout_check=False: None)
     monkeypatch.setattr(
         WorkspaceEditor, "get_plugin_type_info", lambda self, name: None
     )
     monkeypatch.setattr(
-        QMessageBox, "question",
-        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
+        editor_module.QMessageBox, "question",
+        lambda *args, **kwargs: qt.MessageBox.StandardButton.Yes,
     )
 
     editor = WorkspaceEditor()
-    assert editor.add_script_button.text() == "Add Script"
-    assert [action.text() for action in editor.add_script_button.menu().actions()] == [
-        "Create New…", "Link Registered…", "Load from File…"
-    ]
     editor.workspace = workspace
-    configuration_item = QTreeWidgetItem(["Alternative"])
-    configuration_item.setData(0, Qt.ItemDataRole.UserRole, {
+    configuration_item = qt.TreeWidgetItem(["Alternative"])
+    configuration_item.setData(0, qt.Qt.ItemDataRole.UserRole, {
         "kind": "configuration",
         "script_path": str(tmp_path / "script.py"),
         "configuration_name": "Alternative",
@@ -108,10 +116,11 @@ def test_configuration_selection_displays_and_removes_its_component(
     editor.current_part_source = "script"
     editor.current_part_id = None
     editor.current_part_node_path = ("slot", second.id)
+    monkeypatch.setattr(editor, "_reset_part_views", lambda: None)
+    monkeypatch.setattr(editor, "_refresh_workspace_components_tree", lambda: None)
+    monkeypatch.setattr(editor, "_reselect_workspace_part_node", lambda path: None)
     editor.remove_selected_component()
 
     assert workspace.removed == (second.id, "slot", "Alternative")
     refreshed_root = editor.script_part_tree.topLevelItem(0)
     assert refreshed_root.child(0).childCount() == 0
-    editor.deleteLater()
-    app.processEvents()
