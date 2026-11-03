@@ -31,8 +31,8 @@ from rpp_orchestrator.workspace import create_workspace, open_workspace, default
 from rpp_plugin_registrator.library_manager import LibraryManager
 from rpp_plugin_registrator import registry_config as rp
 from rpp_orchestrator.workspace import Workspace, ComponentRecord
-from tests.fake_qt_helpers import install_fake_qt
-from tests.utils import create_mock_workspace, example_source, setup_test_plugins
+from fake_qt_helpers import install_fake_qt
+from utils import create_mock_workspace, example_source, setup_test_plugins
 
 
 @pytest.fixture(scope="module")

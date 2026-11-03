@@ -4,7 +4,7 @@ import importlib
 from pathlib import Path
 from types import SimpleNamespace
 
-from tests.fake_qt_helpers import install_fake_qt
+from fake_qt_helpers import install_fake_qt
 
 
 class FakeWorkspace:

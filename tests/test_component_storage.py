@@ -10,7 +10,7 @@ from rpp_orchestrator.component_storage import (
     ComponentParameterStore,
 )
 
-from tests.utils import setup_test_plugins
+from utils import setup_test_plugins
 
 
 RPP_TESTING_PATH = Path(__file__).parent.parent.parent.resolve() \
