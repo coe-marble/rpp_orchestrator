@@ -1,1 +1,9 @@
-PyQt6
+PyQt6<7,>=6.4
+rpp-common<0.2,>=0.1
+rpp-plugin-registrator<0.2,>=0.1
+
+[runtime]
+rpp-py<0.2,>=0.1
+
+[test]
+pytest<9,>=8
