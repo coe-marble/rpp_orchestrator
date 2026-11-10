@@ -131,7 +131,7 @@ def setup_test_plugins(rpp_home) -> LibraryManager:
                 "",
                 "class MockControllerWithOptionsComponentPlugin(MotionController2D):",
                 "    COMPONENTS = {",
-                "        \"ctl1\": \"Options[rpp_testing::MotionController2D]\",",
+                "        \"ctl1\": \"Option[rpp_testing::MotionController2D]\",",
                 "    }",
                 "",
                 "    def name(self) -> str:",

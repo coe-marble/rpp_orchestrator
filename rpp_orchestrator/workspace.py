@@ -8,7 +8,7 @@ import json
 import shutil
 from typing import Any, Generator
 
-from rpp_common.component_slots import parse_component_slot_type
+from rpp_py.component_slots import parse_component_slot_type
 from rpp_common.helpers import restore_on_failure
 from rpp_orchestrator.layout import ComponentLayout
 from rpp_plugin_registrator.library_manager import LibraryManager
@@ -1089,7 +1089,9 @@ class Workspace:
                 f"Slot {component_key} was not found in script "
                 f"{script_h.path.name}. Available slots: {available_slots}."
             )
-        slot_type, allow_list = parse_component_slot_type(slot_spec)
+        slot = parse_component_slot_type(slot_spec)
+        slot_type = slot.plugin_type
+        allow_list = slot.accepts_component_list
         if record.plugin_type != slot_type:
             raise ValueError(f"Plugin type '{record.plugin_name}'"
                 + f" does not match slot type '{slot_type}'"
@@ -1154,7 +1156,9 @@ class Workspace:
             raise ValueError(f"Plugin '{plugin_name}'"
                 + f" does not have a component slot named '{slot_name}'")
 
-        slot_type, allow_list = parse_component_slot_type(components[slot_name])
+        slot = parse_component_slot_type(components[slot_name])
+        slot_type = slot.plugin_type
+        allow_list = slot.accepts_component_list
         # If it's a list, we don't overwrite; if it's a single component, we can overwrite
         overwrite = not allow_list
 
