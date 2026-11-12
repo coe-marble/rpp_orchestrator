@@ -1106,13 +1106,8 @@ class Workspace:
             if not any(item.get("Id") == record.id for item in existing):
                 existing.append(new_item)
             components[component_key] = existing
-        elif existing is not None:
-            # Convert single id to list
-            if existing["Id"] == record.id:
-                components[component_key] = [existing, new_item]
-            else:
-                components[component_key] = [existing]
         else:
+            # A single slot holds one component: assigning replaces it.
             components[component_key] = [new_item]
         self.write_script_description(
             script_h.path,
