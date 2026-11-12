@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace as dataclasses_replace
-import importlib.util
 import keyword
 from pathlib import Path
 from typing import Any
@@ -190,14 +189,12 @@ class ComponentParameterStore:
         params_path = self.parameters_path(component_folder)
         if not params_path.exists():
             return {}
-        spec = importlib.util.spec_from_file_location("rpp_component_parameters", params_path)
-        if spec is None or spec.loader is None:
-            return {}
+        # Compile the source directly: an imported module may come from a
+        # bytecode cache that is still valid for a file rewritten in place.
+        namespace: dict[str, Any] = {"__name__": "rpp_component_parameters"}
+        exec(compile(params_path.read_text(encoding="utf-8"), str(params_path), "exec"), namespace)
 
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-
-        params_class = getattr(module, "ComponentParameters", None)
+        params_class = namespace.get("ComponentParameters")
         if params_class is None:
             return {}
 
