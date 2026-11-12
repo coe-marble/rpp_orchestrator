@@ -208,10 +208,32 @@ class ComponentParameterStore:
             loaded[name] = _python_safe_value(value)
         return loaded
 
+    def declared_parameter_names(self, component_folder: Path) -> set[str] | None:
+        """Names the plugin of a component declares, or None if not known."""
+        description_path = component_folder / self.layout.description_filename
+        if self.lib_manager is None or not description_path.is_file():
+            return None
+        description = json.loads(description_path.read_text(encoding="utf-8"))
+        try:
+            plugin_info = self.lib_manager.get_plugin_info_from_lib(description["PluginName"])
+        except ValueError:
+            # A plugin that is not registered cannot be checked.
+            return None
+        return set(_normalize_parameters_payload(
+            plugin_info["PluginMetadata"].get("Parameters", {})))
+
     def save(self, component_folder: Path, payload: dict[str, Any]) -> Path:
         params_path = self.parameters_path(component_folder)
         params_path.parent.mkdir(parents=True, exist_ok=True)
         normalized = _normalize_parameters_payload(payload)
+        declared = self.declared_parameter_names(component_folder)
+        if declared is not None:
+            # Names already stored stay accepted, so an older file can still be edited.
+            undeclared = set(normalized) - declared - set(self.load(component_folder))
+            if undeclared:
+                raise ValueError(
+                    f"Parameter '{sorted(undeclared)[0]}' is not declared by the plugin. "
+                    f"Declared parameters: {', '.join(sorted(declared)) or 'none'}.")
         params_path.write_text(
             _build_component_parameters_source(normalized), encoding="utf-8")
         return params_path
