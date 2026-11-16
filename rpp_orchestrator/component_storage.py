@@ -507,7 +507,7 @@ class ComponentDataStore:
         )
 
         if allow_list:
-            subcomponent_container = parent_record.subcomponents.get(slot_name, [])
+            subcomponent_container = parent_record.subcomponents.setdefault(slot_name, [])
             idx = next((i for i, sub in enumerate(subcomponent_container) \
                     if sub.id == link_record.id), None)
             if idx is None:
