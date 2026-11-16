@@ -628,12 +628,13 @@ class Workspace:
         if name in configurations:
             raise ValueError(f"Configuration '{name}' already exists.")
 
-        source_components = self.script_configuration_components(
+        # Raises if the source configuration does not exist.
+        self.script_configuration_components(
             description, source_configuration_name
         )
-        configurations[name] = {
-            "Components": copy.deepcopy(source_components)
-        }
+        configurations[name] = copy.deepcopy(
+            configurations[source_configuration_name]
+        )
         self._write_script_description_payload(description, script_h.path)
 
     def rename_script_configuration(
@@ -1106,13 +1107,8 @@ class Workspace:
             if not any(item.get("Id") == record.id for item in existing):
                 existing.append(new_item)
             components[component_key] = existing
-        elif existing is not None:
-            # Convert single id to list
-            if existing["Id"] == record.id:
-                components[component_key] = [existing, new_item]
-            else:
-                components[component_key] = [existing]
         else:
+            # A single slot holds one component: assigning replaces it.
             components[component_key] = [new_item]
         self.write_script_description(
             script_h.path,
