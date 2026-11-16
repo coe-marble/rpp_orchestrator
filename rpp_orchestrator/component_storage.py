@@ -191,7 +191,8 @@ class ComponentParameterStore:
             return {}
         # Compile the source directly: an imported module may come from a
         # bytecode cache that is still valid for a file rewritten in place.
-        namespace: dict[str, Any] = {"__name__": "rpp_component_parameters"}
+        namespace: dict[str, Any] = {
+            "__name__": "rpp_component_parameters", "__file__": str(params_path)}
         exec(compile(params_path.read_text(encoding="utf-8"), str(params_path), "exec"), namespace)
 
         params_class = namespace.get("ComponentParameters")
