@@ -1,6 +1,6 @@
 # rpp_orchestrator
 
-Workspace storage, script configurations, component composition, and GUI management for RPP.
+Workspace storage, script configurations, [component][glossary-component] composition, and GUI management for RPP.
 
 Documentation is maintained in `rpp_docs`:
 
@@ -8,3 +8,5 @@ Documentation is maintained in `rpp_docs`:
 - [Core workflows](../../rpp_docs/docs/workflows.md).
 
 [Read the guide on GitHub](https://github.com/coe-marble/rpp_docs/blob/develop/docs/workspaces.md).
+
+[glossary-component]: https://github.com/coe-marble/rpp_docs/blob/develop/docs/glossary.md#component "Component: a saved plugin configuration with parameters and optional subcomponents."
